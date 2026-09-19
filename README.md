@@ -57,6 +57,10 @@
 
 KitchenOwl is a smart self-hosted grocery list and recipe manager. Easily add items to your shopping list before you go shopping. You can also create recipes and get suggestions on what you want to cook. Track your expenses so you know how much you've spent.
 
+This fork is planning a connected food-management extension, starting with Pantry
+through REST and MCP. See the [fork documentation](backend/docs/README.md) for the
+vision, roadmap and implementation checklist. Pantry is not implemented yet.
+
 - Native Mobile/Web/Desktop apps with a great design
 - Add items to your shopping list and sync them in real-time with multiple users
 - Partial offline support, so you don't lose track of what to buy even when there is no signal

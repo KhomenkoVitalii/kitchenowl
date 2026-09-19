@@ -1,3 +1,9 @@
+## Fork development plan
+
+Start with the [fork documentation](docs/README.md) and the
+[Phase 1 Pantry checklist](docs/implementation/pantry.md). These describe planned
+work; the Pantry feature is not implemented yet.
+
 ## Contributing
 
 Take a look at the general contribution rules [here](../CONTRIBUTING.md).
