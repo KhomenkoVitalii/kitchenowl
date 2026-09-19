@@ -4,8 +4,9 @@ This fork connects KitchenOwl's existing recipes, shopping and planning with
 Pantry, cooking, leftovers and actual consumption. The product direction is
 defined; the next work is **Phase 1: Pantry backend + MCP**.
 
-**Current status:** documentation and design only. Pantry is not implemented in
-this checkout. All implementation tasks below are still open.
+**Current status:** P1-01 implemented on `phase/01-pantry` — Pantry locations, stock
+creation and reads (REST + MCP), the tracked-Item merge guard and the migration are
+in place with tests. P1-02 (correct/consume/restock/bulk) is next.
 
 | Read | Use it for |
 | --- | --- |

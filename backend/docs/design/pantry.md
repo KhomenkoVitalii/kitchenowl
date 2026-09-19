@@ -1,6 +1,8 @@
 # Phase 1: Pantry backend and MCP
 
-Status: implementation specification for this fork; not implemented.
+Status: implementation specification for this fork; section 1 steps 1–2, 5 and the
+create/read paths are implemented (P1-01). Correction, consumption, restock, bulk
+apply and location rename/delete remain (P1-02+).
 Scope: `backend/`. Product intent: [Vision](../VISION.md).
 Sequence: [Roadmap](../ROADMAP.md). Work order: [implementation checklist](../implementation/pantry.md).
 

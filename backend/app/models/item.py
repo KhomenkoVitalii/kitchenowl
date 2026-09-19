@@ -10,7 +10,7 @@ from sqlalchemy.orm import Mapped
 
 Model = db.Model
 if TYPE_CHECKING:
-    from app.models import Household, RecipeItems, ShoppinglistItems
+    from app.models import Household, RecipeItems, ShoppinglistItems, InventoryItems
     from app.helpers.db_model_base import DbModelBase
 
     Model = DbModelBase
@@ -57,6 +57,14 @@ class Item(Model, DbModelAuthorizeMixin):
         Mapped[List["ShoppinglistItems"]],
         db.relationship(
             "ShoppinglistItems",
+            back_populates="item",
+            cascade="all, delete-orphan",
+        ),
+    )
+    inventory_entries: Mapped[List["InventoryItems"]] = cast(
+        Mapped[List["InventoryItems"]],
+        db.relationship(
+            "InventoryItems",
             back_populates="item",
             cascade="all, delete-orphan",
         ),
@@ -112,6 +120,13 @@ class Item(Model, DbModelAuthorizeMixin):
     def merge(self, other: Self) -> None:
         if other.household_id != self.household_id:
             return
+
+        # MVP guard: refuse to merge Items that carry Pantry stock until full
+        # stock reconciliation exists. Covers every caller, including direct
+        # model use, and locks the household against concurrent stock creation.
+        from app.service.inventory import guard_item_merge
+
+        guard_item_merge(self, other)
 
         from app.models import RecipeItems
         from app.models import History

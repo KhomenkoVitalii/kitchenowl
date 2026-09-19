@@ -20,6 +20,7 @@ if TYPE_CHECKING:
         OIDCLink,
         OIDCRequest,
         Report,
+        InventoryItems,
     )
     from app.helpers.db_model_base import DbModelBase
 
@@ -145,6 +146,15 @@ class User(Model):
             "Report",
             foreign_keys="[Report.user_id]",
             back_populates="user",
+        ),
+    )
+    # Deleting a user clears attribution (created_by ON DELETE SET NULL); the
+    # stock entries themselves are retained.
+    inventory_entries: Mapped[List["InventoryItems"]] = cast(
+        Mapped[List["InventoryItems"]],
+        db.relationship(
+            "InventoryItems",
+            back_populates="created_by_user",
         ),
     )
 

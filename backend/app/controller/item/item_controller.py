@@ -103,6 +103,16 @@ def updateItem(args, id):
         raise NotFoundRequest()
     item.checkAuthorized()
 
+    mergeItem = None
+    if "merge_item_id" in args and args["merge_item_id"] != id:
+        mergeItem = Item.find_by_id(args["merge_item_id"])
+        # Reject a merge that would touch Pantry stock before persisting any of
+        # the edits below (the model guards direct callers too).
+        if mergeItem and mergeItem.household_id == item.household_id:
+            from app.service.inventory import guard_item_merge
+
+            guard_item_merge(item, mergeItem)
+
     if "category" in args:
         if not args["category"]:
             item.category = None
@@ -118,9 +128,7 @@ def updateItem(args, id):
             item.name = newName
     item.save()
 
-    if "merge_item_id" in args and args["merge_item_id"] != id:
-        mergeItem = Item.find_by_id(args["merge_item_id"])
-        if mergeItem:
-            item.merge(mergeItem)
+    if mergeItem:
+        item.merge(mergeItem)
 
     return jsonify(item.obj_to_dict())

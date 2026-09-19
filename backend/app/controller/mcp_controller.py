@@ -29,6 +29,8 @@ from app.models import (
 )
 from app.models.recipe import RecipeVisibility
 from app.service.recipe_scraping import scrape
+from app.service.inventory import InventoryError
+from app.mcp.pantry import TOOLS as PANTRY_TOOLS
 
 mcp = Blueprint("mcp", __name__)
 
@@ -885,26 +887,43 @@ def _dispatch(body: Any) -> Any:
         elif method == "ping":
             result = {}
         elif method == "tools/list":
-            result = {
-                "tools": [
-                    {
-                        "name": name,
-                        "description": f"KitchenOwl tool: {name}",
-                        "inputSchema": schema,
-                    }
-                    for name, (schema, _) in TOOLS.items()
-                ]
-            }
+            tools = [
+                {
+                    "name": name,
+                    "description": f"KitchenOwl tool: {name}",
+                    "inputSchema": schema,
+                }
+                for name, (schema, _) in TOOLS.items()
+            ]
+            tools += [tool.metadata(name) for name, tool in PANTRY_TOOLS.items()]
+            result = {"tools": tools}
         elif method == "tools/call":
             name = params.get("name")
             args = params.get("arguments") or {}
-            if name not in TOOLS:
+            if name in PANTRY_TOOLS:
+                # Pantry tools own their own transaction in the shared service, so
+                # they bypass the legacy dispatch commit below. Expected domain
+                # failures are reported as tool errors, not JSON-RPC errors.
+                try:
+                    payload = PANTRY_TOOLS[name].handler(current_user, args)
+                except InventoryError as err:
+                    db.session.rollback()
+                    result = _as_tool_result(err.payload())
+                    result["isError"] = True
+                    return None if is_notification else {
+                        "jsonrpc": "2.0",
+                        "id": id_value,
+                        "result": result,
+                    }
+                result = _as_tool_result(payload)
+            elif name in TOOLS:
+                _, handler = TOOLS[name]
+                result = _as_tool_result(handler(args))
+                db.session.commit()
+            else:
                 return None if is_notification else _rpc_error(
                     id_value, -32602, f"Unknown tool: {name}"
                 )
-            _, handler = TOOLS[name]
-            result = _as_tool_result(handler(args))
-            db.session.commit()
         else:
             return None if is_notification else _rpc_error(
                 id_value, -32601, f"Method not found: {method}"

@@ -15,6 +15,7 @@ if TYPE_CHECKING:
         ExpenseCategory,
         User,
         File,
+        Inventory,
     )
     from app.helpers.db_model_base import DbModelBase
 
@@ -101,6 +102,14 @@ class Household(Model):
         Mapped[List["HouseholdMember"]],
         db.relationship(
             "HouseholdMember",
+            back_populates="household",
+            cascade="all, delete-orphan",
+        ),
+    )
+    inventories: Mapped[List["Inventory"]] = cast(
+        Mapped[List["Inventory"]],
+        db.relationship(
+            "Inventory",
             back_populates="household",
             cascade="all, delete-orphan",
         ),

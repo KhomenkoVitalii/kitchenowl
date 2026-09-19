@@ -1,11 +1,11 @@
 # Pantry implementation checklist
 
-Status: **not started**. Contract: [Phase 1 specification](../design/pantry.md).
-Product sequence: [Roadmap](../ROADMAP.md).
+Status: **P1-01 implemented**; P1-02 is next. Contract:
+[Phase 1 specification](../design/pantry.md). Product sequence: [Roadmap](../ROADMAP.md).
 
-**Next task: P1-01.** Build one working REST/MCP path before expanding to the full
-command set. All tasks remain unchecked; this document records a plan, not shipped
-capabilities. Paths below are relative to `backend/`.
+**Next task: P1-02.** P1-01 built one working REST/MCP path (locations, create and
+read stock) with the shared service, merge guard and both transports wired in.
+Paths below are relative to `backend/`.
 
 ## Personal release
 
@@ -13,17 +13,28 @@ capabilities. Paths below are relative to `backend/`.
 
 Depends on: no earlier implementation task.
 
-- [ ] Establish isolated API test baseline using Python 3.14+ and disposable storage.
-- [ ] Add Inventory/InventoryItems, relationships, Pantry backfill and household
-  creation support. Verify the actual migration head before adding a revision.
-- [ ] Add the shared service, permission checks, explicit serialization and
-  transactional name resolution/Item creation.
-- [ ] Implement location discovery, create stock and read stock through both REST
-  and MCP. Support positive/estimated quantity, AVAILABLE, LOW, OUT and UNTRACKED.
-- [ ] Add deletion integrity and the tracked-Item merge guard before real stock
-  can be created through exposed routes. Verify guard rollback and concurrent access.
-- [ ] Add Pantry-specific tool metadata/error handling and separate its transaction
-  ownership from legacy MCP dispatch.
+- [x] Establish isolated API test baseline using Python 3.14+ and disposable storage.
+  Ran the API suite against a disposable SQLite DB/storage (see "Validation during
+  implementation"); baseline before this task was 101 passed, 1 pre-existing planner
+  failure (`test_meal_planning_cooking_date_field`).
+- [x] Add Inventory/InventoryItems, relationships, Pantry backfill and household
+  creation support. Models registered in `app/models/__init__.py`; reciprocal
+  relationships on `Household`/`Item`/`User`; migration `a82c914e6d30` (head
+  `0b10d67750be`) backfills one Pantry per household; a `before_flush` listener
+  provisions a Pantry on ORM household creation.
+- [x] Add the shared service, permission checks, explicit serialization and
+  transactional name resolution/Item creation (`app/service/inventory.py`).
+- [x] Implement location discovery, create stock and read stock through both REST
+  and MCP. Positive/estimated quantity, AVAILABLE, LOW, OUT and UNTRACKED covered
+  by `tests/api/test_api_inventory.py`.
+- [x] Add deletion integrity and the tracked-Item merge guard before real stock
+  can be created through exposed routes. Guard wired into `Item.merge` and the item
+  controller; rollback and cascade/attribution deletion verified by tests.
+  Concurrent creation is serialized by a DB-level household lock (`lock_household`).
+- [x] Add Pantry-specific tool metadata/error handling and separate its transaction
+  ownership from legacy MCP dispatch. Pantry tools dispatch through the shared
+  service (own commit), bypass the legacy dispatch commit, and report domain
+  failures as `isError` tool results.
 
 Likely files: new `app/models/inventory.py`, `app/service/inventory.py`,
 `app/controller/inventory/{__init__,schemas,inventory_controller}.py`,
@@ -142,11 +153,11 @@ Add real entries here during implementation; empty fields mean no evidence yet.
 
 | Evidence | Result |
 | --- | --- |
-| Implementation commits / PRs | Pending |
-| Baseline and release test results | Pending |
-| Deployment database and successful migration/restore | Pending |
-| Client, transport and demonstrated workflow | Pending |
-| Seven-day usage notes: repeated friction, repairs, decisions changed | Pending |
+| Implementation commits / PRs | P1-01 wired on `phase/01-pantry` (models, service, REST/MCP, merge guard, migration, tests). |
+| Baseline and release test results | Full suite 130 passed, 1 pre-existing planner failure. `tests/api/test_api_inventory.py`: 29 passed (create/read, states, isolation, pagination, filters, validation, merge guard, deletion integrity, MCP). |
+| Deployment database and successful migration/restore | SQLite verified: populated upgrade backfills Pantry, downgrade drops pantry tables and preserves households, fresh upgrade recreates schema. Deployment engine + restore still to confirm (P1-04). |
+| Client, transport and demonstrated workflow | REST + MCP stateless HTTP exercised in tests; real MCP client session pending (P1-04). |
+| Seven-day usage notes: repeated friction, repairs, decisions changed | Pending (P1-04). |
 
 After P1-04, write the Phase 2 recipe-availability spec using actual Pantry data and
 a small set of real recipes. Its first decisions are comparable ingredient amounts,

@@ -15,4 +15,5 @@ from .category import *
 from .health_controller import health
 from .analytics import *
 from .report import *
+from .inventory import *
 from .mcp_controller import mcp
