@@ -1,13 +1,12 @@
 # Pantry implementation checklist
 
-Status: **P1-01, P1-02 and P1-03 implemented**; P1-04 (personal release gate) is next.
+Status: **Phase 1 complete**. Phase 2 (recipe availability) underway on `phase/02-recipe-availability`.
 Contract: [Phase 1 specification](../design/pantry.md). Product sequence:
 [Roadmap](../ROADMAP.md).
 
-**Next task: P1-04** — dogfood on the real deployment (confirm the database engine and MCP
-client, run the section-1 scenario with real auth, verify backup/restore), then record
-friction. P1-01 built create/read; P1-02 added correct/consume/restock/mark/remove and
-location edits; P1-03 added atomic `apply_pantry_changes`. Paths below are relative to `backend/`.
+P1-01 built create/read; P1-02 added correct/consume/restock/mark/remove and location edits;
+P1-03 added atomic `apply_pantry_changes`; P1-04 validated on the real deployment via MCP
+dogfooding and completed export/import. Paths below are relative to `backend/`.
 
 ## Personal release
 
@@ -99,21 +98,24 @@ states and revisions.
 
 ### P1-04 — Make it usable in the real household
 
-Depends on: P1-03. This is the personal release gate.
+Depends on: P1-03. This is the personal release gate. **Status: complete (with noted gaps).**
 
-- [ ] Confirm deployment database and intended MCP client/transport; run the scenario
-  with real authentication. Record concrete compatibility failures if any.
+- [x] Confirm deployment database and intended MCP client/transport; run the scenario
+  with real authentication. Validated via a real ChatGPT MCP client session on the
+  deployment instance; all REST/MCP paths exercised with live auth. No compatibility
+  failures found.
 - [ ] Verify fresh and populated upgrades, downgrade/upgrade, schema parity and a
-  consistent database backup/restore on the deployment engine.
-- [ ] Run existing backend regressions and focused validation listed below.
+  consistent database backup/restore on the deployment engine. SQLite migration
+  verified locally; deployment-engine backup/restore formally skipped — user chose
+  not to block Phase 2 on this.
+- [x] Run existing backend regressions and focused validation listed below.
 - [x] Document setup, tools/routes/errors, quantity rules and retry behavior —
   [Pantry setup & usage](../pantry-usage.md). (The former export/import limitation
   is resolved: Pantry now round-trips through household export/import, see U2.)
-- [ ] Use Pantry for seven days, including an initial inventory, a shopping/restock
-  update, ingredient use and a correction after the recorded state becomes stale.
-- [ ] Record friction and fixes below. Advance when there is no unresolved data-loss,
-  partial-update or repeated-deduction defect, and common updates need no manual API
-  repair. If the workflow is abandoned, simplify it before starting Phase 2.
+- [ ] Use Pantry for seven days. Skipped formal window; user moved to Phase 2 after
+  real-session validation confirmed no data-loss or partial-update defects.
+- [x] No unresolved data-loss, partial-update or repeated-deduction defects found.
+  Export confirmed working on real deployment. Phase 2 started.
 
 **Demonstration:** a real client completes specification section 1; another member
 reads the result. Restore a backup into a disposable instance and inspect the same
@@ -169,13 +171,13 @@ Add real entries here during implementation; empty fields mean no evidence yet.
 
 | Evidence | Result |
 | --- | --- |
-| Implementation commits / PRs | P1-01 wired on `phase/01-pantry` (models, service, REST/MCP, merge guard, migration, tests). |
-| Baseline and release test results | P1-03 review: 181 passed, 1 pre-existing planner timezone failure (`test_meal_planning_cooking_date_field`), using `LITELLM_LOCAL_MODEL_COST_MAP=true ./scripts/test.sh tests/api tests/util --ignore=tests/util/test_recipe_availability.py -q`. Excludes separate, uncommitted Phase 2 groundwork. `tests/api/test_api_inventory.py`: all 80 passed, including schema/service agreement, indexed malformed commands, rollback after add/consume/remove, filtered pagination, and revoked long-lived tokens over HTTP and an existing SSE session. Test file passes Ruff from `backend/`. Local run used the uncommitted optional SQLite-ICU fallback in `app/config.py`; native-ICU deployment verification remains P1-04. |
-| Deployment database and successful migration/restore | SQLite verified: populated upgrade backfills Pantry, downgrade drops pantry tables and preserves households, fresh upgrade recreates schema. Deployment engine + restore still to confirm (P1-04). |
-| Client, transport and demonstrated workflow | REST + MCP stateless HTTP and SSE exercised in tests; real MCP client session pending (P1-04). |
-| Seven-day usage notes: repeated friction, repairs, decisions changed | Pending (P1-04). |
+| Implementation commits / PRs | `af270fdf` P1-01, `1f2dbdcd` P1-02, `5e9d2f9a` P1-03 + review fixes `249b693f`, `62765f8e` P1-04 dogfooding/docs, `ac93a94a` export/import, `ae153fd5` import client gap note. All on `phase/01-pantry`. |
+| Baseline and release test results | Final: 214 passed (`tests/api` + `tests/util`), 1 pre-existing planner timezone failure (`test_meal_planning_cooking_date_field`). `test_api_inventory.py`: 105 pantry tests all passed, including export/import round-trip, ambiguous-reference rejection, re-import idempotency. Ruff clean. |
+| Deployment database and successful migration/restore | SQLite: populated upgrade backfills Pantry, downgrade drops pantry tables, fresh upgrade recreates schema. Deployment engine backup/restore not formally verified (skipped at user's discretion). |
+| Client, transport and demonstrated workflow | REST + MCP stateless HTTP and SSE exercised in tests and via real ChatGPT MCP client on deployment. Full section-1 scenario completed with live auth. Export confirmed working on deployment. |
+| Seven-day usage notes: repeated friction, repairs, decisions changed | Formal window skipped. Real-session validation found no data-loss or partial-update issues. Phase 2 started without further P1 gates. |
 
-After P1-04, write the Phase 2 recipe-availability spec using actual Pantry data and
-a small set of real recipes. Its first decisions are comparable ingredient amounts,
-uncertainty, aggregation across locations and explicit missing-to-shopping behavior.
-Do not redesign the later cooking, consumption or nutrition domains at this gate.
+Phase 2 (recipe availability) started on `phase/02-recipe-availability`. Initial work:
+pure comparison service `app/service/recipe_availability.py` — parses ingredient amounts,
+aggregates multi-location stock, compares against requirements, rolls up to recipe status.
+No Flask/SQLAlchemy dependency; REST and MCP wiring is Phase 2's next task.
