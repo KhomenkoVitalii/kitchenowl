@@ -124,10 +124,20 @@ def _authorized_recipe(recipe_id: int, actor: User) -> Recipe:
     return recipe
 
 
+def evaluate_recipe(actor: User, recipe_id: int) -> tuple[Recipe, list[Availability]]:
+    """Authorize and compute a recipe's per-ingredient ``Availability`` objects.
+
+    Returns the ORM ``Recipe`` and the raw comparison rows (Decimals intact), for
+    callers that need the amounts — e.g. the shopping-list transfer's deficit math.
+    ``recipe_availability`` serializes these; this returns them unserialized.
+    """
+    recipe = _authorized_recipe(recipe_id, actor)
+    return recipe, _evaluate(recipe, pantry_snapshot(recipe.household_id))
+
+
 def recipe_availability(actor: User, recipe_id: int) -> dict[str, Any]:
     """Single recipe: full per-ingredient breakdown plus the recipe roll-up."""
-    recipe = _authorized_recipe(recipe_id, actor)
-    availabilities = _evaluate(recipe, pantry_snapshot(recipe.household_id))
+    recipe, availabilities = evaluate_recipe(actor, recipe_id)
     result = _rollup(recipe, availabilities)
     result["ingredients"] = [_serialize_ingredient(row) for row in availabilities]
     return result
