@@ -12,6 +12,14 @@ UNIT = {"type": ["string", "null"], "minLength": 1, "maxLength": 32, "pattern": 
 QUANTITY = {"type": "number", "minimum": 0, "maximum": 999999999.999, "multipleOf": 0.001}
 REVISION = {"type": "string", "minLength": 1, "maxLength": 36}
 
+# A JSON Schema `false` subschema forbids the property. Bulk mark_*/remove take
+# only item_id + expected_revision; these keep the schema in step with the service.
+_NO_STOCK_FIELDS = {
+    "quantity": False, "unit": False, "quantity_is_estimate": False,
+    "state": False, "description": False, "name": False,
+}
+_STRICT_AMOUNT = {"type": "number", "exclusiveMinimum": 0, "maximum": 999999999.999, "multipleOf": 0.001}
+
 LOCATION = {
     "type": "object",
     "properties": {
@@ -290,6 +298,135 @@ TOOLS = {
         },
         output_schema=LOCATION,
         handler=inventory.rename_storage,
+    ),
+    "apply_pantry_changes": PantryTool(
+        description=(
+            "Apply 1–50 pantry-entry changes to ONE household ATOMICALLY. Any invalid or stale "
+            "command rolls the ENTIRE batch back — including catalog Items that earlier add "
+            "commands in the same batch would have created — and returns the failing command's "
+            "zero-based index in the error details. Duplicate targets (including two name strings "
+            "that resolve to the same catalog Item) are detected and rejected before any write "
+            "occurs. Results are returned in the same order as the input commands. This is NOT "
+            "JSON-RPC batching: it is a single transactional operation. Location management "
+            "(create/rename/delete storage) is excluded — use the dedicated storage tools instead."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "household_id": ID,
+                "commands": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "command": {"enum": ["add", "consume", "restock", "set_total",
+                                                 "mark_available", "mark_low", "mark_out",
+                                                 "update_metadata", "remove"]},
+                            "inventory_id": ID,
+                            "item_id": ID,
+                            "name": NAME,
+                            "expected_revision": REVISION,
+                            "quantity": QUANTITY,
+                            "unit": UNIT,
+                            "quantity_is_estimate": {"type": "boolean"},
+                            "state": {"enum": ["AVAILABLE", "LOW", "OUT"]},
+                            "description": {"type": ["string", "null"]},
+                        },
+                        "required": ["command", "inventory_id"],
+                        "additionalProperties": False,
+                        "allOf": [
+                            {
+                                "if": {"properties": {"command": {"const": "add"}}, "required": ["command"]},
+                                "then": {
+                                    "properties": {"expected_revision": False},
+                                    "allOf": [
+                                        {"oneOf": [{"required": ["item_id"]}, {"required": ["name"]}]},
+                                        {"oneOf": [{"required": ["quantity"]}, {"required": ["state"]}]},
+                                        {
+                                            "if": {"properties": {"quantity": {"exclusiveMinimum": 0}}, "required": ["quantity"]},
+                                            "then": {"properties": {"unit": {"type": "string"}}, "required": ["unit"]},
+                                        },
+                                        {
+                                            "if": {"required": ["state"]},
+                                            "then": {"properties": {"quantity_is_estimate": {"const": False}}},
+                                        },
+                                    ],
+                                },
+                            },
+                            {
+                                "if": {"properties": {"command": {"const": "consume"}}, "required": ["command"]},
+                                "then": {
+                                    "required": ["item_id", "expected_revision", "quantity", "unit"],
+                                    "properties": {"quantity": _STRICT_AMOUNT, "unit": {"type": "string"},
+                                                   "name": False, "state": False, "description": False},
+                                },
+                            },
+                            {
+                                "if": {"properties": {"command": {"const": "restock"}}, "required": ["command"]},
+                                "then": {
+                                    "required": ["item_id", "expected_revision", "quantity", "unit"],
+                                    "properties": {"quantity": _STRICT_AMOUNT, "unit": {"type": "string"},
+                                                   "name": False, "state": False, "description": False},
+                                },
+                            },
+                            {
+                                "if": {"properties": {"command": {"const": "set_total"}}, "required": ["command"]},
+                                "then": {
+                                    "required": ["item_id", "expected_revision", "quantity", "quantity_is_estimate"],
+                                    "properties": {"name": False, "state": False, "description": False},
+                                    "allOf": [
+                                        {
+                                            "if": {"properties": {"quantity": {"exclusiveMinimum": 0}}, "required": ["quantity"]},
+                                            "then": {"properties": {"unit": {"type": "string"}}, "required": ["unit"]},
+                                        }
+                                    ],
+                                },
+                            },
+                            {
+                                "if": {"properties": {"command": {"const": "mark_available"}}, "required": ["command"]},
+                                "then": {"required": ["item_id", "expected_revision"], "properties": _NO_STOCK_FIELDS},
+                            },
+                            {
+                                "if": {"properties": {"command": {"const": "mark_low"}}, "required": ["command"]},
+                                "then": {"required": ["item_id", "expected_revision"], "properties": _NO_STOCK_FIELDS},
+                            },
+                            {
+                                "if": {"properties": {"command": {"const": "mark_out"}}, "required": ["command"]},
+                                "then": {"required": ["item_id", "expected_revision"], "properties": _NO_STOCK_FIELDS},
+                            },
+                            {
+                                "if": {"properties": {"command": {"const": "update_metadata"}}, "required": ["command"]},
+                                "then": {
+                                    "required": ["item_id", "expected_revision", "description"],
+                                    "properties": {"quantity": False, "unit": False, "quantity_is_estimate": False,
+                                                   "state": False, "name": False},
+                                },
+                            },
+                            {
+                                "if": {"properties": {"command": {"const": "remove"}}, "required": ["command"]},
+                                "then": {"required": ["item_id", "expected_revision"], "properties": _NO_STOCK_FIELDS},
+                            },
+                        ],
+                    },
+                },
+            },
+            "required": ["household_id", "commands"],
+            "additionalProperties": False,
+        },
+        output_schema={
+            "type": "object",
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "items": {"oneOf": [ENTRY, UNTRACKED]},
+                }
+            },
+            "required": ["results"],
+            "additionalProperties": False,
+        },
+        handler=inventory.apply_pantry_changes,
     ),
     "remove_pantry_storage": PantryTool(
         description=(

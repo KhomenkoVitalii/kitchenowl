@@ -4,10 +4,10 @@ This fork connects KitchenOwl's existing recipes, shopping and planning with
 Pantry, cooking, leftovers and actual consumption. The product direction is
 defined; the next work is **Phase 1: Pantry backend + MCP**.
 
-**Current status:** P1-01 and P1-02 implemented on `phase/01-pantry` — Pantry
-locations, stock create/read, correct/consume/restock/mark/remove and location
-rename/delete (REST + MCP) with revision-conditional writes, the merge guard and the
-migration, all with tests. P1-03 (atomic bulk `apply_pantry_changes`) is next.
+**Current status:** P1-01 through P1-03 implemented on `phase/01-pantry` — Pantry
+locations, stock create/read, correct/consume/restock/mark/remove, location edits, and
+atomic bulk `apply_pantry_changes` (REST + MCP, both transports) with revision-conditional
+writes, the merge guard and the migration, all with tests. P1-04 (real-deployment gate) is next.
 
 | Read | Use it for |
 | --- | --- |

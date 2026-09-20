@@ -1,12 +1,13 @@
 # Pantry implementation checklist
 
-Status: **P1-01 and P1-02 implemented**; P1-03 is next. Contract:
-[Phase 1 specification](../design/pantry.md). Product sequence: [Roadmap](../ROADMAP.md).
+Status: **P1-01, P1-02 and P1-03 implemented**; P1-04 (personal release gate) is next.
+Contract: [Phase 1 specification](../design/pantry.md). Product sequence:
+[Roadmap](../ROADMAP.md).
 
-**Next task: P1-03** (atomic `apply_pantry_changes`, pagination/filter completion,
-discoverable tool-schema tests). P1-01 built the create/read path; P1-02 added correct/
-consume/restock/mark/remove and location rename/delete with revision-conditional writes,
-across the shared service, REST and MCP. Paths below are relative to `backend/`.
+**Next task: P1-04** — dogfood on the real deployment (confirm the database engine and MCP
+client, run the section-1 scenario with real auth, verify backup/restore), then record
+friction. P1-01 built create/read; P1-02 added correct/consume/restock/mark/remove and
+location edits; P1-03 added atomic `apply_pantry_changes`. Paths below are relative to `backend/`.
 
 ## Personal release
 
@@ -76,15 +77,20 @@ UNTRACKED. Invalid arithmetic and failed location deletion make no changes.
 
 ### P1-03 — Update a whole pantry in one interaction
 
-Depends on: P1-02.
+Depends on: P1-02. Status: **implemented**.
 
-- [ ] Add `apply_pantry_changes` to REST and MCP with 1–50 commands and indexed errors.
-- [ ] Resolve/validate all targets, reject duplicates and apply in one transaction.
-- [ ] Cover rollback after catalog Item creation and after earlier valid commands.
-- [ ] Complete stock pagination/filtering and explicit Item lookup; verify no entries
-  disappear silently when more than one page is needed.
-- [ ] Test discoverable tool schemas against actual accepted/rejected arguments,
-  including nullable values, both transports and revoked credentials.
+- [x] Add `apply_pantry_changes` to REST (`POST /household/<h>/inventory/changes`) and MCP
+  with 1–50 commands and indexed errors (the failing command's zero-based `index` in details).
+- [x] Resolve/validate all targets, reject duplicates (incl. names resolving to the same Item)
+  and apply in one transaction. Single-op logic was refactored into shared commit-free appliers.
+- [x] Cover rollback after catalog Item creation and after earlier valid commands: a batch whose
+  later command is stale rolls back an earlier add, consume or removal, preserving revisions
+  and leaving no orphan Item.
+- [x] Complete stock pagination/filtering and explicit Item lookup; verified no entries disappear
+  across pages, including paging with a state filter applied.
+- [x] Test discoverable tool schemas against service validation, accepted/rejected arguments
+  incl. nullable values, indexed malformed commands, both transports (stateless HTTP and SSE),
+  unauthenticated access and revoked long-lived tokens (including an already-open SSE session).
 
 **Demonstration:** one call records eggs, half a bag of rice, LOW milk and OUT
 chicken. A second call with one stale/invalid command changes none of them and
@@ -163,9 +169,9 @@ Add real entries here during implementation; empty fields mean no evidence yet.
 | Evidence | Result |
 | --- | --- |
 | Implementation commits / PRs | P1-01 wired on `phase/01-pantry` (models, service, REST/MCP, merge guard, migration, tests). |
-| Baseline and release test results | Full suite 159 passed, 1 pre-existing planner failure. `tests/api/test_api_inventory.py`: 58 passed (P1-01 create/read/isolation/pagination/filters/merge guard/deletion; P1-02 consume/restock/set_total, mark states, remove, revision conflict incl. two-session compare-and-swap, location rename/delete, via service + REST + MCP). |
+| Baseline and release test results | P1-03 review: 181 passed, 1 pre-existing planner timezone failure (`test_meal_planning_cooking_date_field`), using `LITELLM_LOCAL_MODEL_COST_MAP=true ./scripts/test.sh tests/api tests/util --ignore=tests/util/test_recipe_availability.py -q`. Excludes separate, uncommitted Phase 2 groundwork. `tests/api/test_api_inventory.py`: all 80 passed, including schema/service agreement, indexed malformed commands, rollback after add/consume/remove, filtered pagination, and revoked long-lived tokens over HTTP and an existing SSE session. Test file passes Ruff from `backend/`. Local run used the uncommitted optional SQLite-ICU fallback in `app/config.py`; native-ICU deployment verification remains P1-04. |
 | Deployment database and successful migration/restore | SQLite verified: populated upgrade backfills Pantry, downgrade drops pantry tables and preserves households, fresh upgrade recreates schema. Deployment engine + restore still to confirm (P1-04). |
-| Client, transport and demonstrated workflow | REST + MCP stateless HTTP exercised in tests; real MCP client session pending (P1-04). |
+| Client, transport and demonstrated workflow | REST + MCP stateless HTTP and SSE exercised in tests; real MCP client session pending (P1-04). |
 | Seven-day usage notes: repeated friction, repairs, decisions changed | Pending (P1-04). |
 
 After P1-04, write the Phase 2 recipe-availability spec using actual Pantry data and

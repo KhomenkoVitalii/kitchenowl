@@ -175,3 +175,17 @@ class DeleteStorage(Schema):
     household_id = Identifier(required=True)
     inventory_id = Identifier(required=True)
     expected_revision = _revision()
+
+
+class ApplyChanges(Schema):
+    """Envelope only; each command is validated per-command so errors carry an index.
+
+    Commands are accepted as raw values (including null) rather than validated as
+    dicts here: shape errors must surface from the indexed per-command loop with a
+    ``details.index``, not as nested envelope field errors.
+    """
+
+    household_id = Identifier(required=True)
+    commands = fields.List(
+        fields.Raw(allow_none=True), required=True, validate=validate.Length(min=1, max=50)
+    )

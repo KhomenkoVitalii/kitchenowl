@@ -5,9 +5,13 @@ isolation, duplicate protection, the qualitative/estimated states from the relea
 scenario, and the tracked-Item merge guard.
 """
 
+import json as _json
 from types import SimpleNamespace
 
 import pytest
+
+from app.service import inventory as svc
+from tests.api.test_api_mcp_transport import _read_sse_events
 
 
 def _auth(token):
@@ -521,11 +525,8 @@ def test_mcp_create_storage_and_list(env):
 
 
 # --- P1-02: correct, consume, restock, mark-state, remove, location edits ---
-# These call the shared service directly (REST/MCP routes for these operations
-# are wired in later tickets); they prove the domain rules and the
+# These call the shared service directly; they prove the domain rules and the
 # revision-conditional writes the service is responsible for.
-
-from app.service import inventory as svc  # noqa: E402
 
 
 def _actor(name):
@@ -896,3 +897,315 @@ def test_mcp_invalid_input_is_tool_error(env):
     assert "error" not in body
     assert body["result"]["isError"] is True
     assert body["result"]["structuredContent"]["code"] == "invalid_input"
+
+
+# --- P1-03: apply_pantry_changes (atomic bulk) ---
+
+
+def _changes(env, commands, token=None):
+    return env.client.post(
+        f"/api/household/{env.household_id}/inventory/changes",
+        json={"commands": commands},
+        headers=_auth(token or env.alice),
+    )
+
+
+def _catalog_names(env):
+    items = env.client.get(f"/api/household/{env.household_id}/item", headers=_auth(env.alice)).get_json()
+    return {i["name"] for i in items}
+
+
+def test_bulk_records_a_whole_pantry_in_one_call(env):
+    r = _changes(env, [
+        {"command": "add", "inventory_id": env.default_id, "name": "eggs", "quantity": 12, "unit": "pcs"},
+        {"command": "add", "inventory_id": env.default_id, "name": "rice", "quantity": 0.5, "unit": "bag", "quantity_is_estimate": True},
+        {"command": "add", "inventory_id": env.default_id, "name": "milk", "state": "LOW"},
+        {"command": "add", "inventory_id": env.default_id, "name": "chicken", "state": "OUT"},
+    ])
+    assert r.status_code == 200, r.get_json()
+    results = r.get_json()["results"]
+    assert [e["state"] for e in results] == ["AVAILABLE", "AVAILABLE", "LOW", "OUT"]
+
+    listed = env.client.get(f"/api/inventory/{env.default_id}/items", headers=_auth(env.alice)).get_json()
+    assert {e["item"]["name"] for e in listed["items"]} == {"eggs", "rice", "milk", "chicken"}
+
+
+def test_bulk_rolls_back_everything_including_new_items(env):
+    eggs = _eggs(env)  # 12 pcs
+    # Bump the revision so the batch's consume uses a stale one.
+    base = f"/api/inventory/{env.default_id}/item/{eggs['item_id']}"
+    env.client.post(f"{base}/consume", json={"expected_revision": eggs["revision"], "quantity": 1, "unit": "pcs"}, headers=_auth(env.alice))
+
+    r = _changes(env, [
+        {"command": "add", "inventory_id": env.default_id, "name": "flour", "quantity": 1, "unit": "kg"},
+        {"command": "consume", "inventory_id": env.default_id, "item_id": eggs["item_id"], "expected_revision": eggs["revision"], "quantity": 2, "unit": "pcs"},
+    ])
+    assert r.status_code == 409
+    body = r.get_json()
+    assert body["code"] == "revision_conflict"
+    assert body["details"]["index"] == 1
+
+    # The earlier valid add was rolled back: no orphan "flour" Item, eggs untouched (11).
+    assert "flour" not in _catalog_names(env)
+    listed = env.client.get(f"/api/inventory/{env.default_id}/items", headers=_auth(env.alice)).get_json()
+    names = {e["item"]["name"]: e for e in listed["items"]}
+    assert set(names) == {"eggs"}
+    assert names["eggs"]["quantity"] == 11
+
+
+def test_bulk_corrected_request_succeeds(env):
+    eggs = _eggs(env)
+    r = _changes(env, [{"command": "consume", "inventory_id": env.default_id, "item_id": eggs["item_id"], "expected_revision": "stale-revision", "quantity": 1, "unit": "pcs"}])
+    assert r.status_code == 409 and r.get_json()["details"]["index"] == 0
+
+    # Re-read the current revision and resend: now it applies.
+    current = env.client.get(f"/api/inventory/{env.default_id}/item/{eggs['item_id']}", headers=_auth(env.alice)).get_json()
+    r = _changes(env, [{"command": "consume", "inventory_id": env.default_id, "item_id": eggs["item_id"], "expected_revision": current["revision"], "quantity": 1, "unit": "pcs"}])
+    assert r.status_code == 200
+    assert r.get_json()["results"][0]["quantity"] == 11
+
+
+def test_bulk_rejects_duplicate_targets_before_applying(env):
+    r = _changes(env, [
+        {"command": "add", "inventory_id": env.default_id, "name": "salt", "quantity": 1, "unit": "pcs"},
+        {"command": "add", "inventory_id": env.default_id, "name": "Salt", "quantity": 2, "unit": "pcs"},
+    ])
+    assert r.status_code == 409
+    assert r.get_json()["code"] == "duplicate_target"
+    assert r.get_json()["details"]["index"] == 1
+    assert "salt" not in _catalog_names(env)  # nothing created
+
+
+def test_bulk_reports_index_of_invalid_command(env):
+    r = _changes(env, [
+        {"command": "add", "inventory_id": env.default_id, "name": "ok", "quantity": 1, "unit": "pcs"},
+        {"command": "add", "inventory_id": env.default_id, "name": "bad", "quantity": -5, "unit": "pcs"},
+    ])
+    assert r.status_code == 400
+    assert r.get_json()["code"] == "invalid_input"
+    assert r.get_json()["details"]["index"] == 1
+
+
+def test_bulk_size_bounds(env):
+    assert _changes(env, []).status_code == 400
+    too_many = [{"command": "add", "inventory_id": env.default_id, "name": f"i{n}", "quantity": 1, "unit": "pcs"} for n in range(51)]
+    assert _changes(env, too_many).status_code == 400
+
+
+def test_bulk_mixed_operations_apply_in_order(env):
+    eggs = _eggs(env)
+    r = _changes(env, [
+        {"command": "add", "inventory_id": env.default_id, "name": "butter", "quantity": 2, "unit": "pcs"},
+        {"command": "set_total", "inventory_id": env.default_id, "item_id": eggs["item_id"], "expected_revision": eggs["revision"], "quantity": 6, "unit": "pcs", "quantity_is_estimate": False},
+    ])
+    assert r.status_code == 200
+    results = r.get_json()["results"]
+    assert results[0]["item"]["name"] == "butter"
+    assert results[1]["quantity"] == 6
+
+
+# --- P1-03: pagination-with-filter, MCP bulk, discoverability, transports, auth ---
+
+
+def test_pagination_with_filter_serves_all_matches_no_leak(env):
+    for n in ["a", "b", "c", "d", "e"]:
+        _add(env, env.alice, env.default_id, {"name": n, "quantity": 1, "unit": "pcs"})
+    for n in ["x", "y"]:
+        _add(env, env.alice, env.default_id, {"name": n, "state": "LOW"})
+
+    seen, cursor, pages = [], None, 0
+    while True:
+        url = f"/api/inventory/{env.default_id}/items?state=AVAILABLE&limit=2"
+        if cursor:
+            url += f"&cursor={cursor}"
+        body = env.client.get(url, headers=_auth(env.alice)).get_json()
+        seen += [e["item"]["name"] for e in body["items"]]
+        pages += 1
+        cursor = body["next_cursor"]
+        if cursor is None:
+            break
+        assert pages < 10
+    assert sorted(seen) == ["a", "b", "c", "d", "e"]  # every match, LOW excluded
+    assert len(seen) == len(set(seen))
+
+
+def test_apply_pantry_changes_over_mcp(env):
+    r = _rpc(env.client, env.alice, "apply_pantry_changes", {"household_id": env.household_id, "commands": [
+        {"command": "add", "inventory_id": env.default_id, "name": "eggs", "quantity": 12, "unit": "pcs"},
+        {"command": "add", "inventory_id": env.default_id, "name": "milk", "state": "LOW"},
+    ]})
+    assert r.status_code == 200 and "error" not in r.get_json()
+    results = r.get_json()["result"]["structuredContent"]["results"]
+    assert [e["state"] for e in results] == ["AVAILABLE", "LOW"]
+
+
+def test_apply_pantry_changes_error_is_tool_error_with_index(env):
+    r = _rpc(env.client, env.alice, "apply_pantry_changes", {"household_id": env.household_id, "commands": [
+        {"command": "add", "inventory_id": env.default_id, "name": "ok", "quantity": 1, "unit": "pcs"},
+        {"command": "consume", "inventory_id": env.default_id, "item_id": 999999, "expected_revision": "r", "quantity": 1, "unit": "pcs"},
+    ]})
+    body = r.get_json()
+    assert "error" not in body
+    assert body["result"]["isError"] is True
+    assert body["result"]["structuredContent"]["details"]["index"] == 1
+    assert "ok" not in _catalog_names(env)  # batch rolled back, no orphan Item
+
+
+def test_apply_pantry_changes_accepts_null_description(env):
+    r = _rpc(env.client, env.alice, "apply_pantry_changes", {"household_id": env.household_id, "commands": [
+        {"command": "add", "inventory_id": env.default_id, "name": "eggs", "quantity": 1, "unit": "pcs", "description": None},
+    ]})
+    assert r.status_code == 200 and "error" not in r.get_json()
+    assert r.get_json()["result"]["structuredContent"]["results"][0]["description"] is None
+
+
+def test_apply_pantry_changes_is_discoverable(env):
+    r = env.client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}, headers=_auth(env.alice))
+    tools = {t["name"]: t for t in r.get_json()["result"]["tools"]}
+    assert "apply_pantry_changes" in tools
+    commands = tools["apply_pantry_changes"]["inputSchema"]["properties"]["commands"]
+    assert commands["type"] == "array" and commands["maxItems"] == 50
+
+
+def test_pantry_tool_works_over_sse_transport(env):
+    from app.controller.mcp_controller import _sse_sessions
+
+    _sse_sessions.clear()
+    stream = env.client.get("/mcp/sse", headers=_auth(env.alice))
+    assert stream.status_code == 200
+    (event, endpoint), = _read_sse_events(stream, 1)
+    assert event == "endpoint"
+
+    res = env.client.post(endpoint, json={"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "get_pantry", "arguments": {"household_id": env.household_id}}}, headers=_auth(env.alice))
+    assert res.status_code == 202
+
+    (ev, data), = _read_sse_events(stream, 1)
+    assert ev == "message"
+    payload = _json.loads(data)
+    assert payload["id"] == 5
+    assert payload["result"]["structuredContent"]["default_inventory_id"] == env.default_id
+    stream.close()
+    _sse_sessions.clear()
+
+
+def test_pantry_requires_authentication_on_both_transports(env):
+    saved = env.client.environ_base.pop("HTTP_AUTHORIZATION", None)
+    try:
+        assert env.client.get(f"/api/inventory/{env.default_id}/items").status_code == 401
+        mcp = env.client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "get_pantry", "arguments": {"household_id": env.household_id}}})
+        assert mcp.status_code == 401
+    finally:
+        if saved is not None:
+            env.client.environ_base["HTTP_AUTHORIZATION"] = saved
+
+
+@pytest.mark.parametrize("transport", ["rest", "mcp"])
+@pytest.mark.parametrize("malformed", [None, 42])
+def test_bulk_malformed_command_returns_index(env, transport, malformed):
+    commands = [
+        {"command": "add", "inventory_id": env.default_id, "name": "flour", "state": "LOW"},
+        malformed,
+    ]
+    if transport == "rest":
+        response = _changes(env, commands)
+        assert response.status_code == 400
+        error = response.get_json()
+    else:
+        response = _rpc(env.client, env.alice, "apply_pantry_changes", {
+            "household_id": env.household_id, "commands": commands,
+        })
+        assert response.get_json()["result"]["isError"] is True
+        error = response.get_json()["result"]["structuredContent"]
+    assert error["code"] == "invalid_input"
+    assert error["details"]["index"] == 1
+    assert "flour" not in _catalog_names(env)
+
+
+@pytest.mark.parametrize("command", ["consume", "remove"])
+def test_bulk_rolls_back_prior_mutation_and_revision(env, command):
+    eggs = _eggs(env)
+    milk = _changes(env, [{
+        "command": "add", "inventory_id": env.default_id, "name": "milk", "state": "LOW",
+    }]).get_json()["results"][0]
+    first = {
+        "command": command, "inventory_id": env.default_id,
+        "item_id": eggs["item_id"], "expected_revision": eggs["revision"],
+    }
+    if command == "consume":
+        first.update(quantity=1, unit="pcs")
+    response = _changes(env, [first, {
+        "command": "mark_out", "inventory_id": env.default_id,
+        "item_id": milk["item_id"], "expected_revision": "stale",
+    }])
+    assert response.status_code == 409
+    assert response.get_json()["details"]["index"] == 1
+    current = env.client.get(
+        f"/api/inventory/{env.default_id}/item/{eggs['item_id']}", headers=_auth(env.alice),
+    ).get_json()
+    assert current == eggs
+
+
+def test_bulk_discovered_schema_agrees_with_command_validation(env):
+    from jsonschema import Draft202012Validator
+
+    response = env.client.post("/mcp", json={
+        "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {},
+    }, headers=_auth(env.alice))
+    schema = next(tool["inputSchema"] for tool in response.get_json()["result"]["tools"]
+                  if tool["name"] == "apply_pantry_changes")
+    Draft202012Validator.check_schema(schema)
+    validator = Draft202012Validator(schema)
+    target = {"inventory_id": env.default_id, "item_id": 1, "expected_revision": "r"}
+    cases = [
+        ({"command": "add", "inventory_id": env.default_id, "name": "milk", "state": "LOW"}, True),
+        ({"command": "add", "inventory_id": env.default_id, "name": "milk", "state": "LOW", "quantity_is_estimate": True}, False),
+        ({**target, "command": "consume", "quantity": 1, "unit": "pcs"}, True),
+        ({**target, "command": "consume", "quantity": 0, "unit": "pcs"}, False),
+        ({**target, "command": "restock", "quantity": 1, "unit": None}, False),
+        ({**target, "command": "mark_out"}, True),
+        ({**target, "command": "mark_out", "quantity": 10}, False),
+        ({**target, "command": "set_total", "quantity": 0, "quantity_is_estimate": False}, True),
+        ({**target, "command": "set_total", "quantity": 1, "quantity_is_estimate": False}, False),
+        ({**target, "command": "update_metadata", "description": None}, True),
+        ({**target, "command": "remove", "description": None}, False),
+    ]
+    for command, accepted in cases:
+        assert validator.is_valid({"household_id": env.household_id, "commands": [command]}) == accepted, command
+        if accepted:
+            svc._prepare_command(command, env.household_id)
+        else:
+            with pytest.raises(svc.InventoryError) as error:
+                svc._prepare_command(command, env.household_id)
+            assert error.value.code == "invalid_input"
+
+
+def test_revoked_pantry_token_cannot_write_over_http_or_existing_sse_session(env):
+    from flask_jwt_extended import decode_token
+
+    from app.controller.mcp_controller import _sse_sessions
+    from app.models import Token
+
+    response = env.client.post("/api/auth/llt", json={"device": "pantry-review"}, headers=_auth(env.alice))
+    assert response.status_code == 200
+    token = response.get_json()["longlived_token"]
+    token_id = Token.find_by_jti(decode_token(token)["jti"]).id
+    stream = env.client.get("/mcp/sse", headers=_auth(token))
+    assert stream.status_code == 200
+    try:
+        (event, endpoint), = _read_sse_events(stream, 1)
+        assert event == "endpoint"
+        assert env.client.delete(f"/api/auth/llt/{token_id}", headers=_auth(env.alice)).status_code == 200
+        request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+            "name": "apply_pantry_changes", "arguments": {
+                "household_id": env.household_id, "commands": [{
+                    "command": "add", "inventory_id": env.default_id, "name": "revoked-write", "state": "LOW",
+                }],
+            },
+        }}
+        for url in ["/mcp", endpoint]:
+            assert env.client.post(url, json=request, headers=_auth(token)).status_code == 401
+        assert env.client.get("/mcp/sse", headers=_auth(token)).status_code == 401
+        assert "revoked-write" not in _catalog_names(env)
+    finally:
+        stream.close()
+        _sse_sessions.clear()

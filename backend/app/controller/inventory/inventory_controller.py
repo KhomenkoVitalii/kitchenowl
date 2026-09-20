@@ -53,6 +53,12 @@ def create_location(household_id: int):
     return jsonify(service.create_storage(current_user, _arguments({"household_id": household_id}))), 201
 
 
+@inventory_household.route("/changes", methods=["POST"])
+@jwt_required()
+def apply_changes(household_id: int):
+    return jsonify(service.apply_pantry_changes(current_user, _arguments({"household_id": household_id})))
+
+
 @inventory.route("/<int:inventory_id>/items", methods=["GET"])
 @jwt_required()
 def list_stock(inventory_id: int):

@@ -1,9 +1,9 @@
 # Phase 1: Pantry backend and MCP
 
-Status: implementation specification for this fork; section 1 steps 1–7 are
-implemented (P1-01 create/read; P1-02 correct/consume/restock/mark/remove and
-location rename/delete with revision-conditional writes). Atomic bulk
-`apply_pantry_changes` and pagination/filter completion remain (P1-03).
+Status: implementation specification for this fork; the full section-1 workflow is
+implemented (P1-01 create/read; P1-02 correct/consume/restock/mark/remove and location
+edits; P1-03 atomic `apply_pantry_changes`, pagination/filter, both MCP transports), all
+with revision-conditional writes. Remaining Phase 1 work is the P1-04 real-deployment gate.
 Scope: `backend/`. Product intent: [Vision](../VISION.md).
 Sequence: [Roadmap](../ROADMAP.md). Work order: [implementation checklist](../implementation/pantry.md).
 
