@@ -31,6 +31,7 @@ from app.models.recipe import RecipeVisibility
 from app.service.recipe_scraping import scrape
 from app.service.inventory import InventoryError
 from app.mcp.pantry import TOOLS as PANTRY_TOOLS
+from app.mcp.recipe_availability import TOOLS as AVAILABILITY_TOOLS
 
 mcp = Blueprint("mcp", __name__)
 
@@ -903,6 +904,7 @@ def _dispatch(body: Any) -> Any:
                 for name, (schema, _) in TOOLS.items()
             ]
             tools += [tool.metadata(name) for name, tool in PANTRY_TOOLS.items()]
+            tools += [tool.metadata(name) for name, tool in AVAILABILITY_TOOLS.items()]
             result = {"tools": tools}
         elif method == "tools/call":
             name = params.get("name")
@@ -913,6 +915,19 @@ def _dispatch(body: Any) -> Any:
                 # failures are reported as tool errors, not JSON-RPC errors.
                 try:
                     payload = PANTRY_TOOLS[name].handler(current_user, args)
+                except InventoryError as err:
+                    db.session.rollback()
+                    result = _as_tool_result(err.payload())
+                    result["isError"] = True
+                    return None if is_notification else {
+                        "jsonrpc": "2.0",
+                        "id": id_value,
+                        "result": result,
+                    }
+                result = _as_tool_result(payload)
+            elif name in AVAILABILITY_TOOLS:
+                try:
+                    payload = AVAILABILITY_TOOLS[name].handler(current_user, args)
                 except InventoryError as err:
                     db.session.rollback()
                     result = _as_tool_result(err.payload())

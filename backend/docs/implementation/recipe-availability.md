@@ -60,46 +60,53 @@ Depends on: P2-01. New file `app/service/recipe_shopping_transfer.py`. **No REST
 - [ ] Amount rules: `OUT`/`UNTRACKED` → full requirement; `INSUFFICIENT` → deficit
   (`required − available`, matching units only); unknown/uncomparable → item with no
   structured quantity, keep recipe `description` as the note.
-- [ ] `UNCERTAIN` skipped; `optional=true` skipped by default; `AVAILABLE` skipped.
-- [ ] Existing shopping-list item → merge/update (combine amount where comparable), never
-  duplicate.
-- [ ] Return per-ingredient action report: `added` / `updated` / `skipped_uncertain` /
-  `skipped_optional` / `skipped_available`. Atomic: any failure transfers nothing.
+- [x] `UNCERTAIN` skipped; `optional=true` skipped by default; `AVAILABLE` skipped.
+- [x] Existing shopping-list item → merge/update, never duplicate. NOTE: the current cut
+  OVERWRITES the existing free-text description with the newly computed amount rather than
+  summing comparable amounts (shopping items store a free-text note, not a structured
+  quantity). Amount-combining on merge is deferred — see open decision below.
+- [x] Return per-ingredient action report: `added` / `updated` / `skipped_uncertain` /
+  `skipped_optional` / `skipped_available`. Atomic: single commit at the end, rollback on
+  any failure.
 
 **Acceptance:** the §4 matrix; merge-not-duplicate; atomic rollback; no implicit conversion.
+Built by a Sonnet 4.5 worker; reviewed by Opus.
 
-### P2-02 — REST endpoints (Sonnet 4.5)
+**Open decision (user):** on merge, overwrite vs. combine-comparable-amounts vs. preserve a
+user's existing note. Current behavior overwrites. Raise with the user before upstreaming.
 
-Depends on: P2-01, P2-04. New `app/controller/recipe/availability_controller.py` +
-blueprint registration. Mirror existing recipe/household controllers.
+### P2-02 — REST endpoints — **done**
 
-- [ ] `GET /recipe/<id>/availability` → P2-01 single.
-- [ ] `GET /household/<id>/recipes/availability` → P2-01 bulk.
-- [ ] `POST /recipe/<id>/availability/transfer` (`{shoppinglist_id}`) → P2-04.
-- [ ] `@jwt_required` + household authorization; domain errors → correct HTTP codes.
+New `app/controller/recipe/availability_controller.py` + blueprint registration. Built by a
+Sonnet 4.5 worker (mirrors `inventory_controller.py`); reviewed by Opus.
 
-Contract handed to the worker: exact service function names, input dicts and return
-shapes from P2-01/P2-04, plus the controller file to mirror.
+- [x] `GET /recipe/<id>/availability` → P2-01 single.
+- [x] `GET /household/<id>/recipe/availability` → P2-01 bulk.
+- [x] `POST /recipe/<id>/availability/transfer` (`{shoppinglist_id}`) → P2-04.
+- [x] `@jwt_required`; InventoryError handled app-wide by the existing inventory error
+  handler → correct HTTP codes. `recipe/__init__.py` given an `__all__` (Opus).
 
-### P2-03 — MCP tools (Sonnet 4.5)
+### P2-03 — MCP tools — **done**
 
-Depends on: P2-01, P2-04. New `app/mcp/recipe_availability.py` + dispatch registration.
-Mirror `app/mcp/pantry.py` (own commit, `InventoryError`/domain error → `isError`).
+New `app/mcp/recipe_availability.py` + dispatch registration in `mcp_controller.py`. Built by
+a Sonnet 4.5 worker (mirrors `app/mcp/pantry.py`); reviewed by Opus.
 
-- [ ] `check_recipe_availability` (single), `list_recipe_availability` (bulk roll-up),
-  `add_missing_to_shopping_list` (transfer, returns the action report).
-- [ ] Tool descriptions state bulk = roll-ups only; detail via the single tool; and the
-  agent-behavior principles (preserve uncertainty; never auto-resolve `UNCERTAIN`).
+- [x] `check_recipe_availability` (single), `list_recipe_availability` (bulk roll-up wrapped
+  as `{items:[...]}`), `add_missing_to_shopping_list` (transfer, returns the action report).
+- [x] Tool descriptions state bulk = roll-ups only; detail via the single tool; and never
+  treat `UNCERTAIN` as available. Dispatch mirrors the pantry branch (InventoryError→isError,
+  service owns its commit).
 
-### P2-05 — Integration tests (Opus runs/verifies; workers may draft)
+### P2-05 — Integration tests — **done**
 
-New `tests/api/test_api_recipe_availability.py`.
+New `tests/api/test_api_recipe_availability.py` (15 tests, Opus).
 
-- [ ] Single + bulk over REST and MCP; agreement between them.
-- [ ] Bulk snapshot reuse: one pantry read serves many recipes.
-- [ ] Transfer matrix: OUT/UNTRACKED full amount, INSUFFICIENT deficit, UNCERTAIN skipped,
+- [x] Single + bulk over REST and MCP; agreement between them.
+- [x] Bulk snapshot reuse: asserted exactly one `inventory_items` query for three recipes.
+- [x] Transfer matrix: OUT/UNTRACKED full amount, INSUFFICIENT deficit, UNCERTAIN skipped,
   optional skipped, merge-not-duplicate, unknown-amount item carries the recipe note.
-- [ ] Authorization, 404s, atomic transfer rollback.
+- [x] Authorization (403 cross-household for both read and transfer), 404s, missing
+  `shoppinglist_id` → 400, atomic transfer rollback (monkeypatched commit failure adds nothing).
 
 **Demonstration:** a recipe needing 400 g chicken (200 g in pantry), 250 g rice
 (qualitative AVAILABLE) and 1 onion (untracked) reports chicken `INSUFFICIENT`, rice
@@ -119,10 +126,10 @@ Add real entries during implementation; empty fields mean no evidence yet.
 
 | Evidence | Result |
 | --- | --- |
-| Implementation commits / PRs | `e9b83725` pure comparison core + Phase 1 close-out. |
-| Baseline and release test results | Pending P2-01…P2-05. |
-| Client, transport and demonstrated workflow | Pending real MCP dogfooding session. |
-| Usage notes: friction, repairs, decisions changed | Pending. |
+| Implementation commits / PRs | `e9b83725` pure core + Phase 1 close-out; `651adde1` spec; `89600ad5`/`(this)` adapter+evaluate_recipe; `(this)` transfer + REST + MCP + tests (P2-02..P2-05). |
+| Baseline and release test results | Full `tests/api tests/util`: **255 passed, 1 failed** — the one failure is the pre-existing planner timezone baseline (`test_meal_planning_cooking_date_field`); zero Phase 2 regressions. `test_api_recipe_availability.py`: 15 passed (incl. one-query bulk snapshot, transfer matrix, atomic rollback, REST/MCP agreement). New files ruff-clean; MCP files match the existing `pantry.py` style. |
+| Client, transport and demonstrated workflow | REST + MCP exercised in tests. Real MCP dogfooding session pending (the Phase 2 validation gate). |
+| Usage notes: friction, repairs, decisions changed | Pending dogfooding. |
 
 After the dogfooding gate, write the Phase 3 (recipe acquisition/normalization) spec
 using the amount-parsing gaps this phase actually surfaces. Do not pre-design later
