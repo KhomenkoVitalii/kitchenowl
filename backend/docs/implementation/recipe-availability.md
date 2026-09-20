@@ -20,26 +20,35 @@ REST and MCP tickets against exact contracts, then Opus runs the suite and revie
   upstream boundary.
 - [x] This checklist.
 
-### P2-01 — DB→core adapter and pantry snapshot (Opus)
+### P2-01 — DB→core adapter and pantry snapshot (Opus) — **done**
 
 Depends on: the pure core `app/service/recipe_availability.py`. New file
 `app/service/recipe_availability_query.py`.
 
-- [ ] `pantry_snapshot(household_id) -> Mapping[int, list[Observation]]`: one query over
+- [x] `pantry_snapshot(household_id) -> dict[int, list[Observation]]`: one query over
   the household's `InventoryItems` across all locations; map each row to
   `Observation(item_id, quantity, unit, quantity_is_estimate)`.
-- [ ] `recipe_requirements(recipe) -> list[Requirement]` from `RecipeItems`
-  (`parse_requirement(item_id, item._name, description, optional)`).
-- [ ] `recipe_availability(actor, recipe_id) -> dict`: authorize household, build
+- [x] `recipe_requirements(recipe) -> list[Requirement]` from `RecipeItems`
+  (`parse_requirement(item_id, item.name, description, optional)`).
+- [x] `recipe_availability(actor, recipe_id) -> dict`: authorize household, build
   requirements, look up observations in a snapshot, `compare_requirements` +
   `recipe_status`, serialize full per-ingredient breakdown + recipe status.
-- [ ] `household_recipes_availability(actor, household_id) -> list[dict]`: **one** snapshot,
+- [x] `household_recipes_availability(actor, household_id) -> list[dict]`: **one** snapshot,
   evaluate every household recipe, return `{recipe_id, name, status, missing_count,
   uncertain_count}` — roll-ups only, no ingredient detail.
-- [ ] Invalid recipe → 404; cross-household recipe not evaluated (same-household MVP).
+- [x] Invalid recipe → 404 (`InventoryError`); cross-household recipe blocked by `authorize`.
 
 **Acceptance:** a bulk call over N recipes issues exactly one `InventoryItems` query;
-single and bulk agree on each recipe's status.
+single and bulk agree on each recipe's status. (Behavior verified in P2-05.)
+
+**Frozen contract for P2-02/03/04** — all return plain JSON-able dicts, raise
+`app.service.inventory.InventoryError` (has `.code`, `.status`, `.payload()`):
+- `recipe_availability(actor: User, recipe_id: int) -> dict` → `{recipe_id, name, status,
+  missing_count, uncertain_count, ingredients: [{item_id, name, status, required,
+  required_unit, available, available_unit, available_is_partial, optional, description}]}`.
+- `household_recipes_availability(actor: User, household_id: int) -> list[dict]` → each
+  `{recipe_id, name, status, missing_count, uncertain_count}`.
+- `pantry_snapshot(household_id: int) -> dict[int, list[Observation]]` (internal reuse).
 
 ### P2-04 — Transfer service contract only (Opus, or Sonnet with exact contract)
 
