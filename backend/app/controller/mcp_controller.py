@@ -840,7 +840,14 @@ LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0]
 SERVER_INSTRUCTIONS = (
     "KitchenOwl manages households, each of which owns shopping lists, items, "
     "recipes, tags, meal plans and expenses. Nearly every tool is scoped to a "
-    "household, so call list_households first and reuse the id you get back."
+    "household, so call list_households first and reuse the id you get back. "
+    "For Pantry tools: infer intent, not the tool name — a spoken 'add' may mean "
+    "create, restock or set a new total, so read current stock (get_pantry) before "
+    "choosing. Preserve uncertainty: mark guessed amounts as estimated, never invent "
+    "exact quantities or create catalog items from vague product names, and ask one "
+    "categorical question if a persisted amount is genuinely unclear. On a "
+    "revision_conflict, reread the entry before retrying — never blindly resend a "
+    "deduction."
 )
 
 SSE_KEEPALIVE_SECONDS = 15

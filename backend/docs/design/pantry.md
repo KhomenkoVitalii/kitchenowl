@@ -339,3 +339,25 @@ code; create the fork migration from the actual local head regardless.
 
 There are no unresolved product choices that block the first local implementation
 task. Client/deployment checks are delivery tasks, not assumptions of compatibility.
+
+## 10. Client and agent behavior
+
+These principles govern how a natural-language agent should drive the Pantry tools.
+They were confirmed through MCP testing. The service enforces data integrity; the
+agent is responsible for intent and for not persisting invented facts.
+
+1. **Preserve uncertainty; never silently invent persistent facts.** Use existing
+   context first. If a required assumption materially affects persisted Pantry state,
+   ask at most one low-friction clarification question. Prefer categorical
+   clarification ("a full bag or nearly empty?") over demanding exact measurements.
+   Mark estimated amounts as estimated (`quantity_is_estimate`), never as exact.
+
+2. **Infer the user's intent, not the tool name.** A spoken "add" may mean create,
+   restock, or set a new total. Read current Pantry state when needed, then choose
+   the matching operation (`add_pantry_item` vs `restock` vs `set_total`). Do not
+   create persistent catalog Items from vague or unresolved product identities.
+
+3. **Mutations must be conservative and retry-safe.** Never blindly repeat a write
+   after a `revision_conflict`: reread the entry and resolve the ambiguity first. Do
+   not fold unresolved input into an atomic `apply_pantry_changes` batch when it could
+   persist bad data — resolve the target first, then commit.
