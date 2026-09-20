@@ -106,8 +106,9 @@ Depends on: P1-03. This is the personal release gate.
 - [ ] Verify fresh and populated upgrades, downgrade/upgrade, schema parity and a
   consistent database backup/restore on the deployment engine.
 - [ ] Run existing backend regressions and focused validation listed below.
-- [ ] Document setup, tools/routes/errors, quantity rules, retry behavior and the
-  temporary limitation that application export/import excludes Pantry.
+- [x] Document setup, tools/routes/errors, quantity rules and retry behavior —
+  [Pantry setup & usage](../pantry-usage.md). (The former export/import limitation
+  is resolved: Pantry now round-trips through household export/import, see U2.)
 - [ ] Use Pantry for seven days, including an initial inventory, a shopping/restock
   update, ingredient use and a correction after the recorded state becomes stale.
 - [ ] Record friction and fixes below. Advance when there is no unresolved data-loss,
@@ -153,7 +154,7 @@ applicable integration tasks; maintainer acceptance is a separate decision.
 | ID | Work | Completion evidence |
 | --- | --- | --- |
 | U1 | Full tracked Item merges replacing the MVP guard | Noncolliding rows move, compatible stock combines, conflicts roll back stock and legacy references together; concurrency verified. |
-| U2 | Portable export/import | Old export works; Pantry round-trip preserves stock; repeated import does not double it; ambiguous references fail atomically. |
+| U2 | Portable export/import — **done** | Old exports still import; Pantry round-trips through household export/import; repeated import replaces (never doubles); ambiguous references rejected before any write. `import_pantry.py` + `test_api_inventory.py`. |
 | U3 | Live notifications | REST/MCP send identical post-commit events to the correct household; rollback sends none; delivery failure does not retry a committed mutation. |
 | U4 | Compatibility matrix and API documentation | SQLite/PostgreSQL migrations, concurrency, constraints and lifecycle tests; generated OpenAPI matches schemas; setup is reproducible. |
 | U5 | Upstream package | Reverified upstream code/base, attributed adaptations, migration strategy, focused diff and validation notes; branch/PR expectations resolved before submission. |

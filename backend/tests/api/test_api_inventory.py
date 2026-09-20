@@ -1307,3 +1307,110 @@ def test_revoked_token_is_rejected_on_both_transports(env):
 def test_revoked_token_cannot_open_an_sse_session(env):
     assert env.client.delete("/api/auth", headers=_auth(env.alice)).status_code == 200
     assert env.client.get("/mcp/sse", headers=_auth(env.alice)).status_code == 401
+
+
+# --- Pantry export/import (U2): portable round-trip ---
+
+
+def _create_household(env, name):
+    uid = env.client.get("/api/user", headers=_auth(env.alice)).get_json()["id"]
+    env.client.post("/api/household", json={"name": name, "member": [uid]}, headers=_auth(env.alice))
+    hid = next(
+        h["id"] for h in env.client.get("/api/household", headers=_auth(env.alice)).get_json()
+        if h["name"] == name
+    )
+    default = env.client.get(
+        f"/api/household/{hid}/inventory", headers=_auth(env.alice)
+    ).get_json()["default_inventory_id"]
+    return hid, default
+
+
+def _locations(env, household_id):
+    return env.client.get(
+        f"/api/household/{household_id}/inventory", headers=_auth(env.alice)
+    ).get_json()["items"]
+
+
+def _entries_by_name(env, inventory_id):
+    listed = env.client.get(
+        f"/api/inventory/{inventory_id}/items", headers=_auth(env.alice)
+    ).get_json()["items"]
+    return {e["item"]["name"]: e for e in listed}
+
+
+def test_pantry_export_import_roundtrip_preserves_stock(env):
+    _add(env, env.alice, env.default_id, {"name": "eggs", "quantity": 12, "unit": "pcs"})
+    _add(env, env.alice, env.default_id, {"name": "milk", "state": "LOW"})
+    _add(env, env.alice, env.default_id, {"name": "rice", "quantity": 0.5, "unit": "bag", "quantity_is_estimate": True})
+    _add(env, env.alice, env.default_id, {"name": "chicken", "state": "OUT"})
+    fridge = env.client.post(
+        f"/api/household/{env.household_id}/inventory", json={"name": "Fridge"}, headers=_auth(env.alice)
+    ).get_json()
+    _add(env, env.alice, fridge["id"], {"name": "butter", "quantity": 2, "unit": "pcs"})
+
+    export = env.client.get(
+        f"/api/household/{env.household_id}/export", headers=_auth(env.alice)
+    ).get_json()
+    assert "pantry" in export
+
+    hid_b, _ = _create_household(env, "backup")
+    r = env.client.post(f"/api/household/{hid_b}/import", json=export, headers=_auth(env.alice))
+    assert r.status_code == 200, r.get_json()
+
+    locations = {loc["name"]: loc["id"] for loc in _locations(env, hid_b)}
+    assert {"Pantry", "Fridge"} <= set(locations)
+
+    pantry = _entries_by_name(env, locations["Pantry"])
+    assert pantry["eggs"]["quantity"] == 12 and pantry["eggs"]["unit"] == "pcs"
+    assert pantry["milk"]["state"] == "LOW" and pantry["milk"]["quantity"] is None
+    assert pantry["rice"]["quantity"] == 0.5 and pantry["rice"]["quantity_is_estimate"] is True
+    assert pantry["chicken"]["state"] == "OUT"
+    fridge_entries = _entries_by_name(env, locations["Fridge"])
+    assert fridge_entries["butter"]["quantity"] == 2
+
+
+def test_pantry_repeated_import_replaces_and_does_not_double(env):
+    _add(env, env.alice, env.default_id, {"name": "eggs", "quantity": 12, "unit": "pcs"})
+    export = env.client.get(
+        f"/api/household/{env.household_id}/export", headers=_auth(env.alice)
+    ).get_json()
+
+    hid_b, _ = _create_household(env, "backup2")
+    for _ in range(2):
+        assert env.client.post(
+            f"/api/household/{hid_b}/import", json=export, headers=_auth(env.alice)
+        ).status_code == 200
+
+    locations = _locations(env, hid_b)
+    assert [loc["name"] for loc in locations].count("Pantry") == 1  # no duplicate location
+    pantry_id = next(loc["id"] for loc in locations if loc["name"] == "Pantry")
+    entries = env.client.get(
+        f"/api/inventory/{pantry_id}/items", headers=_auth(env.alice)
+    ).get_json()["items"]
+    eggs = [e for e in entries if e["item"]["name"] == "eggs"]
+    assert len(eggs) == 1 and eggs[0]["quantity"] == 12  # replaced, never doubled
+
+
+def test_import_without_pantry_section_still_works(env):
+    hid_b, default_b = _create_household(env, "legacy")
+    r = env.client.post(
+        f"/api/household/{hid_b}/import", json={"items": [{"name": "eggs"}]}, headers=_auth(env.alice)
+    )
+    assert r.status_code == 200
+    assert _entries_by_name(env, default_b) == {}
+
+
+def test_import_rejects_ambiguous_item_without_writing_pantry(env):
+    from app import db
+    from app.models import Item
+
+    hid_b, default_b = _create_household(env, "ambig")
+    db.session.add(Item(household_id=hid_b, name="twin"))
+    db.session.add(Item(household_id=hid_b, name="twin"))
+    db.session.commit()
+
+    payload = {"pantry": [{"name": "Pantry", "items": [{"item": "twin", "quantity": 1, "unit": "pcs"}]}]}
+    r = env.client.post(f"/api/household/{hid_b}/import", json=payload, headers=_auth(env.alice))
+    assert r.status_code == 409
+    assert r.get_json()["code"] == "ambiguous_item"
+    assert _entries_by_name(env, default_b) == {}  # nothing persisted

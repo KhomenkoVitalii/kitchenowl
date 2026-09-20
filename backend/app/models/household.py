@@ -163,6 +163,10 @@ class Household(Model):
             "recipes": [s.obj_to_export_dict() for s in self.recipes],
             "items": [s.obj_to_export_dict() for s in self.items],
             "expenses": [s.obj_to_export_dict() for s in self.expenses],
+            "pantry": [
+                inventory.obj_to_export_dict()
+                for inventory in sorted(self.inventories, key=lambda i: i.id)
+            ],
         }
 
 

@@ -15,6 +15,7 @@ writes, the merge guard and the migration, all with tests. P1-04 (real-deploymen
 | [Roadmap](ROADMAP.md) | Phase order, dependencies and user outcomes. |
 | [Phase 1 implementation checklist](implementation/pantry.md) | What to implement next, in order, and how to prove each step works. Start here for development. |
 | [Phase 1 specification](design/pantry.md) | Pantry behavior, data, REST/MCP contracts and recorded decisions. |
+| [Pantry setup & usage](pantry-usage.md) | User-facing reference: enabling, auth, routes/tools, quantity & retry rules, errors, backup limitation. |
 
 The first release lets a household record eggs, estimated rice, LOW milk and OUT
 chicken in one MCP operation, then consume, restock and correct those entries.

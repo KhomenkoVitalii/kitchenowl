@@ -40,6 +40,12 @@ class Inventory(Model):
         back_populates="inventory", cascade="all, delete-orphan"
     )
 
+    def obj_to_export_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "items": [entry.obj_to_export_dict() for entry in self.items],
+        }
+
 
 class InventoryItems(Model):
     __tablename__ = "inventory_items"
@@ -93,6 +99,18 @@ class InventoryItems(Model):
         if self.stock_state is None:
             raise ValueError("Stock row has neither a quantity nor a stock_state.")
         return self.stock_state
+
+    def obj_to_export_dict(self) -> dict:
+        # Portable: references the Item by name, not id. Revisions/attribution
+        # are intentionally omitted (regenerated / cleared on import).
+        return {
+            "item": self.item.name,
+            "description": self.description,
+            "quantity": float(self.quantity) if self.quantity is not None else None,
+            "unit": self.unit,
+            "quantity_is_estimate": self.quantity_is_estimate,
+            "stock_state": self.stock_state,
+        }
 
 
 @event.listens_for(Session, "before_flush")

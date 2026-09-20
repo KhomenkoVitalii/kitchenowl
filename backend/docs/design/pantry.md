@@ -31,9 +31,9 @@ The first usable release must support this complete interaction:
 | Tested database backup/restore and explicit export limitation | Generated OpenAPI coverage and contribution package |
 
 For the MVP, reads refresh state; no Pantry UI or push subscription is promised.
-Application exports do not yet back up Pantry: use a consistent database backup
-and verify a restore before relying on real stock data. Document this limitation
-in the backend's user-facing setup instructions when implementing the feature.
+Household export/import now includes Pantry (portable, Item-by-name, idempotent
+re-import; see §8 and [Pantry setup & usage](../pantry-usage.md)); a database
+backup/restore remains a valid additional recovery path.
 
 Low thresholds and expiry metadata are optional follow-ups, not prerequisites
 for qualitative LOW or basic stock tracking. Their intended semantics are retained
@@ -296,7 +296,7 @@ Pantry workflow. Implement only when their checklist task is taken up.
 | Expiry | Nullable date, earliest known expiry of aggregate stock, not a lot system. Past dates allowed; no automatic consumption. Restock nonempty stock keeps earliest date; restock OUT resets to supplied date or null. Later-date corrections must be explicit. |
 | Feature flag | `Household.inventory_feature`, false by default if added; presentation only, never authorization. Add when a client needs it. |
 | Item merge | One transaction across stock and existing references. Move noncolliding rows; sum compatible quantities/thresholds, propagate estimate and earliest expiry; qualitative LOW wins. Mixed/ambiguous quantities, incompatible units/thresholds or overflow conflict without changing anything. Refresh revisions. |
-| Export/import | Portable storage/Item references; validate the entire Pantry section before writing. Re-import replaces totals, never adds. Fresh revisions/timestamps; null unresolved attribution; old exports remain valid; reject ambiguous mappings. Legacy whole-household import is not globally atomic. |
+| Export/import | **Implemented.** Portable storage/Item references (by name); the entire Pantry section is validated before writing. Re-import replaces totals, never adds; fresh revisions; null attribution; old exports remain valid; ambiguous mappings are rejected. Whole-household import stays non-atomic across domains. See `app/service/importServices/import_pantry.py`. |
 | Live events | Household rooms only; identical REST/MCP payloads, committed revisions. Preserve researched `inventory:add`, `inventory:delete`, `inventory_item:add`, `inventory_item:remove` names where compatible; add location-update event. Emit after commit; rollback emits nothing. Delivery failure does not turn committed stock into a retryable mutation. |
 | Contribution | Recheck target branch and migration ancestry; attribute adapted code. No external comment or PR is sent as part of this plan. Never rewrite an already-deployed migration. |
 

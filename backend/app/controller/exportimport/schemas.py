@@ -1,4 +1,4 @@
-from marshmallow import EXCLUDE, fields, Schema
+from marshmallow import EXCLUDE, fields, Schema, validate
 
 
 class ImportSchema(Schema):
@@ -56,9 +56,32 @@ class ImportSchema(Schema):
         photo = fields.String(allow_none=True)
         category = fields.Nested(Category)
 
+    class Pantry(Schema):
+        class Meta:
+            unknown = EXCLUDE
+
+        class Entry(Schema):
+            class Meta:
+                unknown = EXCLUDE
+
+            item = fields.String(
+                required=True, validate=lambda a: a and not a.isspace()
+            )
+            description = fields.String(allow_none=True)
+            quantity = fields.Float(allow_none=True)
+            unit = fields.String(allow_none=True)
+            quantity_is_estimate = fields.Boolean(load_default=False)
+            stock_state = fields.String(
+                allow_none=True, validate=validate.OneOf(["AVAILABLE", "LOW"])
+            )
+
+        name = fields.String(required=True, validate=lambda a: a and not a.isspace())
+        items = fields.List(fields.Nested(Entry), load_default=list)
+
     items = fields.List(fields.Nested(Item))
     recipes = fields.List(fields.Nested(Recipe))
     recipe_overwrite = fields.Boolean()
     expenses = fields.List(fields.Nested(Expense))
     member = fields.List(fields.String())
     shoppinglists = fields.List(fields.String())
+    pantry = fields.List(fields.Nested(Pantry))
