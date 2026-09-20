@@ -9,7 +9,9 @@ import json as _json
 from types import SimpleNamespace
 
 import pytest
+from jsonschema import Draft7Validator
 
+from app.mcp.pantry import TOOLS as _PANTRY_TOOLS
 from app.service import inventory as svc
 from tests.api.test_api_mcp_transport import _read_sse_events
 
@@ -1209,3 +1211,99 @@ def test_revoked_pantry_token_cannot_write_over_http_or_existing_sse_session(env
     finally:
         stream.close()
         _sse_sessions.clear()
+
+
+# --- P1-03 review fixes: bulk schema/service agreement, indexed malformed, revocation ---
+
+
+def _bulk_schema_valid(command):
+    schema = _PANTRY_TOOLS["apply_pantry_changes"].input_schema
+    return Draft7Validator(schema).is_valid({"household_id": 1, "commands": [command]})
+
+
+@pytest.mark.parametrize(
+    "command, valid",
+    [
+        # Accepted shapes.
+        ({"command": "add", "inventory_id": 1, "name": "eggs", "quantity": 12, "unit": "pcs"}, True),
+        ({"command": "add", "inventory_id": 1, "name": "milk", "state": "LOW"}, True),
+        ({"command": "consume", "inventory_id": 1, "item_id": 2, "expected_revision": "r", "quantity": 2, "unit": "pcs"}, True),
+        ({"command": "mark_out", "inventory_id": 1, "item_id": 2, "expected_revision": "r"}, True),
+        ({"command": "update_metadata", "inventory_id": 1, "item_id": 2, "expected_revision": "r", "description": "x"}, True),
+        ({"command": "remove", "inventory_id": 1, "item_id": 2, "expected_revision": "r"}, True),
+        # Shapes the service rejects must not be schema-valid.
+        ({"command": "consume", "inventory_id": 1, "item_id": 2, "expected_revision": "r", "quantity": 0, "unit": None}, False),
+        ({"command": "mark_out", "inventory_id": 1, "item_id": 2, "expected_revision": "r", "quantity": 5}, False),
+        ({"command": "add", "inventory_id": 1, "name": "x", "state": "LOW", "quantity_is_estimate": True}, False),
+        ({"command": "mark_low", "inventory_id": 1, "item_id": 2, "expected_revision": "r", "quantity": 1}, False),
+        ({"command": "update_metadata", "inventory_id": 1, "item_id": 2, "expected_revision": "r"}, False),
+        ({"command": "add", "inventory_id": 1, "name": "x", "quantity": 1, "unit": "pcs", "expected_revision": "r"}, False),
+    ],
+)
+def test_bulk_command_schema_matches_service_constraints(command, valid):
+    assert _bulk_schema_valid(command) is valid
+
+
+@pytest.mark.parametrize(
+    "command, fields",
+    [
+        ("consume", {"item_id": 999999, "expected_revision": "r", "quantity": 0, "unit": None}),
+        ("mark_out", {"item_id": 999999, "expected_revision": "r", "quantity": 5}),
+        ("add", {"name": "x", "state": "LOW", "quantity_is_estimate": True}),
+        ("mark_low", {"item_id": 999999, "expected_revision": "r", "quantity": 1}),
+        ("update_metadata", {"item_id": 999999, "expected_revision": "r"}),
+    ],
+)
+def test_bulk_service_rejects_the_same_shapes_with_index(env, command, fields):
+    # The service must reject exactly what the schema forbids, at the command's index.
+    r = _changes(env, [{"command": command, "inventory_id": env.default_id, **fields}])
+    assert r.status_code == 400, r.get_json()
+    body = r.get_json()
+    assert body["code"] == "invalid_input"
+    assert body["details"]["index"] == 0
+
+
+def test_bulk_malformed_command_keeps_its_index_on_both_transports(env):
+    eggs = _eggs(env)
+    valid = {"command": "consume", "inventory_id": env.default_id, "item_id": eggs["item_id"],
+             "expected_revision": eggs["revision"], "quantity": 1, "unit": "pcs"}
+
+    rest = _changes(env, [valid, None])
+    assert rest.status_code == 400
+    assert rest.get_json()["code"] == "invalid_input"
+    assert rest.get_json()["details"]["index"] == 1
+
+    mcp = _rpc(env.client, env.alice, "apply_pantry_changes",
+               {"household_id": env.household_id, "commands": [valid, None]})
+    result = mcp.get_json()["result"]
+    assert result["isError"] is True
+    assert result["structuredContent"]["details"]["index"] == 1
+
+
+def test_sse_transport_requires_authentication(env):
+    saved = env.client.environ_base.pop("HTTP_AUTHORIZATION", None)
+    try:
+        assert env.client.get("/mcp/sse").status_code == 401
+    finally:
+        if saved is not None:
+            env.client.environ_base["HTTP_AUTHORIZATION"] = saved
+
+
+def test_revoked_token_is_rejected_on_both_transports(env):
+    # Revoke alice's token, then confirm it no longer works on REST or MCP.
+    assert env.client.delete("/api/auth", headers=_auth(env.alice)).status_code == 200
+    assert env.client.get(
+        f"/api/inventory/{env.default_id}/items", headers=_auth(env.alice)
+    ).status_code == 401
+    mcp = env.client.post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+              "params": {"name": "get_pantry", "arguments": {"household_id": env.household_id}}},
+        headers=_auth(env.alice),
+    )
+    assert mcp.status_code == 401
+
+
+def test_revoked_token_cannot_open_an_sse_session(env):
+    assert env.client.delete("/api/auth", headers=_auth(env.alice)).status_code == 200
+    assert env.client.get("/mcp/sse", headers=_auth(env.alice)).status_code == 401
