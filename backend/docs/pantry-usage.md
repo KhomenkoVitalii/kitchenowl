@@ -161,3 +161,11 @@ recreates the locations and stock.
 
 A database backup/restore remains a valid recovery path, but is no longer the only
 one for Pantry data.
+
+> **Client support:** the backend (REST) fully supports Pantry export and import,
+> and export already includes the `pantry` section. The Flutter client, however,
+> does **not yet expose a Pantry option in its import screen**, so a Pantry import
+> cannot be triggered from the mobile/web app yet. Until that UI is added, import
+> Pantry by POSTing the export JSON (which contains `pantry`) straight to
+> `POST /api/household/<id>/import` — e.g. re-import a downloaded export with curl.
+> This is a known client follow-up; the backend contract is complete and tested.

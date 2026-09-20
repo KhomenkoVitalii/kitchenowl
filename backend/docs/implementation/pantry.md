@@ -154,7 +154,7 @@ applicable integration tasks; maintainer acceptance is a separate decision.
 | ID | Work | Completion evidence |
 | --- | --- | --- |
 | U1 | Full tracked Item merges replacing the MVP guard | Noncolliding rows move, compatible stock combines, conflicts roll back stock and legacy references together; concurrency verified. |
-| U2 | Portable export/import — **done** | Old exports still import; Pantry round-trips through household export/import; repeated import replaces (never doubles); ambiguous references rejected before any write. `import_pantry.py` + `test_api_inventory.py`. |
+| U2 | Portable export/import — **done (backend)** | Old exports still import; Pantry round-trips through household export/import; repeated import replaces (never doubles); ambiguous references rejected before any write. `import_pantry.py` + `test_api_inventory.py`. Client follow-up: the Flutter import screen has no Pantry toggle yet, so app-driven Pantry import is pending; use the REST import meanwhile. |
 | U3 | Live notifications | REST/MCP send identical post-commit events to the correct household; rollback sends none; delivery failure does not retry a committed mutation. |
 | U4 | Compatibility matrix and API documentation | SQLite/PostgreSQL migrations, concurrency, constraints and lifecycle tests; generated OpenAPI matches schemas; setup is reproducible. |
 | U5 | Upstream package | Reverified upstream code/base, attributed adaptations, migration strategy, focused diff and validation notes; branch/PR expectations resolved before submission. |
