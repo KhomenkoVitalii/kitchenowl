@@ -181,7 +181,7 @@ Examples:
 ```text
 READY_TO_COOK
 MISSING_1
-MISSING_FEW
+MISSING_N
 USES_LEFTOVERS
 USES_EXPIRING_ITEMS
 PANTRY_FRIENDLY
@@ -527,7 +527,7 @@ exactly one ingredient OUT/INSUFFICIENT
 
 ```text
 several ingredients missing
-→ MISSING_FEW
+→ MISSING_N
 ```
 
 Missing counts cover known shortages only. Return untracked/uncertain counts

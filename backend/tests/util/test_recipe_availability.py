@@ -237,4 +237,4 @@ def test_several_known_shortages_count_only_required_ingredients():
     }
     rows = compare_requirements(requirements, observations)
     assert [row.state for row in rows] == ["OUT", "INSUFFICIENT"]
-    assert recipe_status(rows) == "MISSING_FEW"
+    assert recipe_status(rows) == "MISSING_N"

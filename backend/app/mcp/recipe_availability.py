@@ -1,7 +1,8 @@
 """Recipe availability tool metadata; all behavior is shared with REST in the service."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from app.models import User
 from app.service import recipe_availability_query as availability_service

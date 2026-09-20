@@ -6,6 +6,7 @@ from typing import Any
 from app import db
 from app.models import Shoppinglist, ShoppinglistItems, User
 from app.service.inventory import InventoryError
+from app.service.recipe_availability import parse_requirement
 from app.service.recipe_availability_query import evaluate_recipe
 
 
@@ -17,9 +18,9 @@ def _format_amount(d: Decimal) -> str:
 def transfer_missing(actor: User, recipe_id: int, shoppinglist_id: int) -> dict[str, Any]:
     """Move all missing (non-optional, non-available) recipe ingredients onto a shopping list.
 
-    The recipe household and shopping-list household must match. Existing shopping-list
-    entries are overwritten with the newly computed deficit amount rather than summed.
-    Returns a per-ingredient action log.
+    The recipe household and shopping-list household must match. An existing shopping-list
+    entry is combined with the new amount when its note parses to the same canonical unit,
+    and otherwise replaced. Returns a per-ingredient action log.
     """
     # Step 1 – authorize + fresh availability snapshot (raises InventoryError on failure).
     recipe, availabilities = evaluate_recipe(actor, recipe_id)
@@ -86,15 +87,6 @@ def transfer_missing(actor: User, recipe_id: int, shoppinglist_id: int) -> dict[
 
             unit = a.required_unit
 
-            # Build description text.
-            if amount is not None and unit:
-                description = f"{_format_amount(amount)} {unit}"
-            elif amount is not None:
-                description = _format_amount(amount)
-            else:
-                # Unknown / incomparable amount — preserve original recipe text.
-                description = a.source
-
             # Upsert the shopping-list entry.
             con = ShoppinglistItems.find_by_ids(shoppinglist_id, a.item_id)
             if con is None:
@@ -105,6 +97,22 @@ def transfer_missing(actor: User, recipe_id: int, shoppinglist_id: int) -> dict[
                 action_label = "added"
             else:
                 action_label = "updated"
+                # Combine with an existing comparable amount instead of overwriting
+                # it: sum only when the current note parses to the same canonical
+                # unit. A note we cannot parse (or an uncomparable unit) is replaced.
+                if amount is not None:
+                    existing = parse_requirement(a.item_id, a.item_name, con.description)
+                    if existing.amount is not None and existing.unit == unit:
+                        amount = existing.amount + amount
+
+            # Build description text (after any combine).
+            if amount is not None and unit:
+                description = f"{_format_amount(amount)} {unit}"
+            elif amount is not None:
+                description = _format_amount(amount)
+            else:
+                # Unknown / incomparable amount — preserve original recipe text.
+                description = a.source
 
             con.description = description
             db.session.add(con)

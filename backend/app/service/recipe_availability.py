@@ -178,7 +178,7 @@ def recipe_status(availabilities: Iterable[Availability]) -> str:
     """Count known shortages; missing tags do not rule out unknown ingredients.
 
     MISSING_1 means one known shortage, not that buying one item guarantees
-    readiness. MISSING_FEW means two or more known shortages. Consumers must
+    readiness. MISSING_N means two or more known shortages. Consumers must
     retain ingredient states to expose remaining uncertainty.
     """
     all_rows = list(availabilities)
@@ -191,5 +191,5 @@ def recipe_status(availabilities: Iterable[Availability]) -> str:
     if known_missing == 1:
         return "MISSING_1"
     if known_missing > 0:
-        return "MISSING_FEW"
+        return "MISSING_N"
     return "UNCERTAIN"

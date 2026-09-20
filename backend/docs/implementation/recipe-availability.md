@@ -61,19 +61,17 @@ Depends on: P2-01. New file `app/service/recipe_shopping_transfer.py`. **No REST
   (`required − available`, matching units only); unknown/uncomparable → item with no
   structured quantity, keep recipe `description` as the note.
 - [x] `UNCERTAIN` skipped; `optional=true` skipped by default; `AVAILABLE` skipped.
-- [x] Existing shopping-list item → merge/update, never duplicate. NOTE: the current cut
-  OVERWRITES the existing free-text description with the newly computed amount rather than
-  summing comparable amounts (shopping items store a free-text note, not a structured
-  quantity). Amount-combining on merge is deferred — see open decision below.
+- [x] Existing shopping-list item → merge/update, never duplicate. When the current note
+  parses to the same canonical unit as the new amount they are SUMMED (e.g. list "100 g" +
+  recipe deficit "200 g" → "300 g"); a note we cannot parse, or an uncomparable unit, is
+  replaced. Shopping items store free text (no structured quantity), so combining is limited
+  to parseable, same-unit notes.
 - [x] Return per-ingredient action report: `added` / `updated` / `skipped_uncertain` /
   `skipped_optional` / `skipped_available`. Atomic: single commit at the end, rollback on
   any failure.
 
-**Acceptance:** the §4 matrix; merge-not-duplicate; atomic rollback; no implicit conversion.
-Built by a Sonnet 4.5 worker; reviewed by Opus.
-
-**Open decision (user):** on merge, overwrite vs. combine-comparable-amounts vs. preserve a
-user's existing note. Current behavior overwrites. Raise with the user before upstreaming.
+**Acceptance:** the §4 matrix; merge sums comparable amounts (replaces otherwise); atomic
+rollback; no implicit conversion. Built by a Sonnet 4.5 worker; combine-on-merge and review by Opus.
 
 ### P2-02 — REST endpoints — **done**
 

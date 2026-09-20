@@ -207,6 +207,24 @@ def test_ready_to_cook_when_all_sufficient(env):
     assert body["missing_count"] == 0 and body["uncertain_count"] == 0
 
 
+def test_two_known_shortages_are_missing_n(env):
+    recipe_id = _recipe(
+        env,
+        "dinner",
+        [_ingredient("chicken", "400 g"), _ingredient("eggs", "2 pcs")],
+    )
+    _add_stock(env, {"name": "chicken", "quantity": 0})  # OUT
+    _add_stock(env, {"name": "eggs", "quantity": 1, "unit": "pcs"})  # INSUFFICIENT
+    body = env.client.get(
+        f"/api/recipe/{recipe_id}/availability", headers=_auth(env.alice)
+    ).get_json()
+    assert body["status"] == "MISSING_N"
+    assert body["missing_count"] == 2
+    ing = _by_name(body["ingredients"])
+    assert ing["chicken"]["status"] == "OUT"
+    assert ing["eggs"]["status"] == "INSUFFICIENT"
+
+
 def test_bulk_reuses_one_pantry_snapshot(env, stew):
     _recipe(env, "toast", [_ingredient("bread", "2 pcs")])
     _recipe(env, "omelette", [_ingredient("egg", "3 pcs")])
@@ -320,6 +338,25 @@ def test_transfer_merges_not_duplicates(env, stew):
     # One chicken row, updated to the computed deficit (not duplicated).
     assert list(on_list).count("chicken") == 1
     assert on_list["chicken"] == "200 g"
+
+
+def test_transfer_combines_comparable_amounts(env, stew):
+    shoppinglist_id = _shoppinglist(env)
+    # Pre-add chicken with a comparable amount that should be summed, not replaced.
+    res = env.client.post(
+        f"/api/shoppinglist/{shoppinglist_id}/item/{_chicken_item_id(env)}",
+        json={"description": "100 g"},
+        headers=_auth(env.alice),
+    )
+    assert res.status_code == 200, res.get_json()
+
+    env.client.post(
+        f"/api/recipe/{stew}/availability/transfer",
+        json={"shoppinglist_id": shoppinglist_id},
+        headers=_auth(env.alice),
+    )
+    # stew chicken deficit is 200 g; existing 100 g -> combined 300 g.
+    assert _list_items(env, shoppinglist_id)["chicken"] == "300 g"
 
 
 def _chicken_item_id(env):
