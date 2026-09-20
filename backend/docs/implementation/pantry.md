@@ -1,11 +1,12 @@
 # Pantry implementation checklist
 
-Status: **P1-01 implemented**; P1-02 is next. Contract:
+Status: **P1-01 and P1-02 implemented**; P1-03 is next. Contract:
 [Phase 1 specification](../design/pantry.md). Product sequence: [Roadmap](../ROADMAP.md).
 
-**Next task: P1-02.** P1-01 built one working REST/MCP path (locations, create and
-read stock) with the shared service, merge guard and both transports wired in.
-Paths below are relative to `backend/`.
+**Next task: P1-03** (atomic `apply_pantry_changes`, pagination/filter completion,
+discoverable tool-schema tests). P1-01 built the create/read path; P1-02 added correct/
+consume/restock/mark/remove and location rename/delete with revision-conditional writes,
+across the shared service, REST and MCP. Paths below are relative to `backend/`.
 
 ## Personal release
 
@@ -50,14 +51,22 @@ This is an engineering checkpoint; daily-use release requires P1-02 through P1-0
 
 ### P1-02 — Correct, consume and restock
 
-Depends on: P1-01.
+Depends on: P1-01. Status: **implemented**.
 
-- [ ] Add set-total, consume/restock, mark-state, note edit and remove in the shared
-  service; expose each through REST and MCP.
-- [ ] Enforce Decimal bounds, matching units and all state-transition rules.
-- [ ] Add database conditional writes using expected revisions, including deletion.
-- [ ] Complete create/rename/delete location operations with default/nonempty guards.
-- [ ] Verify real multi-session conflict handling and reuse of stale revisions.
+- [x] Add set-total, consume/restock, mark-state, note edit and remove in the shared
+  service; expose each through REST and MCP. Setters go through a discriminated
+  `update_pantry_item`; consume/restock/remove and location rename/delete have their
+  own service functions, REST routes and MCP tools.
+- [x] Enforce Decimal bounds, matching units and all state-transition rules
+  (`quantity_unknown`, `insufficient_stock`, `unit_mismatch`, estimate propagation,
+  OUT-adopts-unit on restock, LOW/AVAILABLE clear the count).
+- [x] Add database conditional writes using expected revisions, including deletion:
+  `UPDATE/DELETE ... WHERE revision = expected`; zero affected rows → `revision_conflict`.
+- [x] Complete create/rename/delete location operations with default/nonempty guards
+  (`default_location`, `location_not_empty`; delete serialized by the household lock).
+- [x] Verify real multi-session conflict handling and reuse of stale revisions:
+  a two-session compare-and-swap test proves only one write wins; stale-revision replay
+  is rejected. Wall-clock multi-worker stress remains part of the P1-04 gate.
 
 **Demonstration:** 12 eggs → consume 2 → 10 → restock 10 → 20 → set total 8 → 8.
 Replay the deduction with its old revision: stock stays unchanged. Two concurrent
@@ -154,7 +163,7 @@ Add real entries here during implementation; empty fields mean no evidence yet.
 | Evidence | Result |
 | --- | --- |
 | Implementation commits / PRs | P1-01 wired on `phase/01-pantry` (models, service, REST/MCP, merge guard, migration, tests). |
-| Baseline and release test results | Full suite 130 passed, 1 pre-existing planner failure. `tests/api/test_api_inventory.py`: 29 passed (create/read, states, isolation, pagination, filters, validation, merge guard, deletion integrity, MCP). |
+| Baseline and release test results | Full suite 159 passed, 1 pre-existing planner failure. `tests/api/test_api_inventory.py`: 58 passed (P1-01 create/read/isolation/pagination/filters/merge guard/deletion; P1-02 consume/restock/set_total, mark states, remove, revision conflict incl. two-session compare-and-swap, location rename/delete, via service + REST + MCP). |
 | Deployment database and successful migration/restore | SQLite verified: populated upgrade backfills Pantry, downgrade drops pantry tables and preserves households, fresh upgrade recreates schema. Deployment engine + restore still to confirm (P1-04). |
 | Client, transport and demonstrated workflow | REST + MCP stateless HTTP exercised in tests; real MCP client session pending (P1-04). |
 | Seven-day usage notes: repeated friction, repairs, decisions changed | Pending (P1-04). |

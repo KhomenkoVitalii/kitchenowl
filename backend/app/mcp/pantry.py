@@ -10,6 +10,7 @@ ID = {"type": "integer", "minimum": 1}
 NAME = {"type": "string", "minLength": 1, "maxLength": 128, "pattern": r"\S"}
 UNIT = {"type": ["string", "null"], "minLength": 1, "maxLength": 32, "pattern": r"\S"}
 QUANTITY = {"type": "number", "minimum": 0, "maximum": 999999999.999, "multipleOf": 0.001}
+REVISION = {"type": "string", "minLength": 1, "maxLength": 36}
 
 LOCATION = {
     "type": "object",
@@ -141,5 +142,182 @@ TOOLS = {
         },
         output_schema=ENTRY,
         handler=inventory.add_stock,
+    ),
+    "consume_pantry_item": PantryTool(
+        description=(
+            "Deduct a strictly positive amount of an Item from its tracked total. The quantity "
+            "argument is added to the running deduction — do NOT call this twice on a timeout; "
+            "re-read the entry and verify whether the first call landed before retrying. The unit "
+            "must match the unit stored on the entry; passing a different unit is rejected. If the "
+            "stored quantity is unknown (null) or qualitative (AVAILABLE/LOW), call "
+            "update_pantry_item with operation=set_total first. On a revision conflict the client "
+            "MUST re-read the entry and retry — never blindly resend the deduction, as the stored "
+            "quantity may have already been updated."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "household_id": ID,
+                "inventory_id": ID,
+                "item_id": ID,
+                "expected_revision": REVISION,
+                "quantity": {"type": "number", "exclusiveMinimum": 0, "maximum": 999999999.999, "multipleOf": 0.001},
+                "unit": {"type": "string", "minLength": 1, "maxLength": 32},
+                "quantity_is_estimate": {"type": "boolean"},
+            },
+            "required": ["household_id", "inventory_id", "item_id", "expected_revision", "quantity", "unit"],
+            "additionalProperties": False,
+        },
+        output_schema=ENTRY,
+        handler=inventory.consume,
+    ),
+    "restock_pantry_item": PantryTool(
+        description=(
+            "Add a strictly positive amount to an Item's tracked total. This increments the "
+            "existing quantity — it does NOT replace it (use update_pantry_item with "
+            "operation=set_total to replace). The unit must match the unit stored on the entry; "
+            "an OUT entry with no unit adopts the supplied one. If the stored quantity is unknown "
+            "(null) or qualitative (AVAILABLE/LOW), call update_pantry_item with "
+            "operation=set_total first. On a revision conflict the client MUST re-read the entry "
+            "and retry — never blindly resend the increment, as the stored quantity may have "
+            "already been updated."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "household_id": ID,
+                "inventory_id": ID,
+                "item_id": ID,
+                "expected_revision": REVISION,
+                "quantity": {"type": "number", "exclusiveMinimum": 0, "maximum": 999999999.999, "multipleOf": 0.001},
+                "unit": {"type": "string", "minLength": 1, "maxLength": 32},
+                "quantity_is_estimate": {"type": "boolean"},
+            },
+            "required": ["household_id", "inventory_id", "item_id", "expected_revision", "quantity", "unit"],
+            "additionalProperties": False,
+        },
+        output_schema=ENTRY,
+        handler=inventory.restock,
+    ),
+    "update_pantry_item": PantryTool(
+        description=(
+            "Mutate an existing tracked entry using one of five operations. "
+            "set_total REPLACES the stored quantity in full — it does not add to or subtract from "
+            "it; contrast with restock_pantry_item and consume_pantry_item. Positive quantities "
+            "require a unit; zero is permitted without one. mark_available and mark_low CLEAR the "
+            "numeric quantity and record a qualitative state (unknown amount, present or low). "
+            "mark_out sets quantity to zero. update_metadata edits the free-text description "
+            "only; pass null to clear it. Each operation is discriminated — you cannot mix "
+            "quantity fields with a mark_* or update_metadata call. On a revision conflict the "
+            "client MUST re-read the entry and retry with the current revision."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "household_id": ID,
+                "inventory_id": ID,
+                "item_id": ID,
+                "expected_revision": REVISION,
+                "operation": {"enum": ["set_total", "mark_available", "mark_low", "mark_out", "update_metadata"]},
+                "quantity": QUANTITY,
+                "unit": UNIT,
+                "quantity_is_estimate": {"type": "boolean"},
+                "description": {"type": ["string", "null"]},
+            },
+            "required": ["household_id", "inventory_id", "item_id", "expected_revision", "operation"],
+            "additionalProperties": False,
+            "allOf": [
+                {
+                    "if": {"properties": {"operation": {"const": "set_total"}}, "required": ["operation"]},
+                    "then": {
+                        "required": ["quantity", "quantity_is_estimate"],
+                        "allOf": [
+                            {
+                                "if": {"properties": {"quantity": {"exclusiveMinimum": 0}}, "required": ["quantity"]},
+                                "then": {"properties": {"unit": {"type": "string"}}, "required": ["unit"]},
+                            }
+                        ],
+                    },
+                },
+                {
+                    "if": {"properties": {"operation": {"const": "update_metadata"}}, "required": ["operation"]},
+                    "then": {"required": ["description"]},
+                },
+            ],
+        },
+        output_schema=ENTRY,
+        handler=inventory.update_pantry_item,
+    ),
+    "remove_pantry_item": PantryTool(
+        description=(
+            "Stop tracking an Item in a location. This removes the stock observation entirely; "
+            "the Item itself is not deleted from the household catalog. The call returns an "
+            "UNTRACKED observation confirming the item is no longer followed in this location. "
+            "expected_revision guards against concurrent edits: on a conflict, re-read the entry "
+            "and retry. To track the item again, use add_pantry_item."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "household_id": ID,
+                "inventory_id": ID,
+                "item_id": ID,
+                "expected_revision": REVISION,
+            },
+            "required": ["household_id", "inventory_id", "item_id", "expected_revision"],
+            "additionalProperties": False,
+        },
+        output_schema=UNTRACKED,
+        handler=inventory.remove_stock,
+    ),
+    "update_pantry_storage": PantryTool(
+        description=(
+            "Rename an existing storage location. Names are display labels only — they are not "
+            "unique identifiers. Use the returned id for all future operations; the id never "
+            "changes. expected_revision guards against concurrent renames: on a conflict, "
+            "re-read the location list and retry with the current revision."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "household_id": ID,
+                "inventory_id": ID,
+                "name": NAME,
+                "expected_revision": REVISION,
+            },
+            "required": ["household_id", "inventory_id", "name", "expected_revision"],
+            "additionalProperties": False,
+        },
+        output_schema=LOCATION,
+        handler=inventory.rename_storage,
+    ),
+    "remove_pantry_storage": PantryTool(
+        description=(
+            "Delete an empty storage location. The location must contain no tracked items; call "
+            "remove_pantry_item for each tracked entry first. The default location (the one with "
+            "the lowest id in the household) cannot be deleted. expected_revision guards against "
+            "concurrent edits: on a conflict, re-read the location list and retry with the "
+            "current revision. Returns the deleted location id and a deleted confirmation flag."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "household_id": ID,
+                "inventory_id": ID,
+                "expected_revision": REVISION,
+            },
+            "required": ["household_id", "inventory_id", "expected_revision"],
+            "additionalProperties": False,
+        },
+        output_schema={
+            "type": "object",
+            "properties": {
+                "id": ID,
+                "deleted": {"const": True},
+            },
+            "required": ["id", "deleted"],
+            "additionalProperties": False,
+        },
+        handler=inventory.delete_storage,
     ),
 }

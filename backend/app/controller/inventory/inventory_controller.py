@@ -80,3 +80,43 @@ def create_stock_by_name(inventory_id: int):
     if "name" not in args:
         raise service.InventoryError("invalid_input", "Item name is required.", 400)
     return jsonify(service.add_stock(current_user, args)), 201
+
+
+@inventory.route("/<int:inventory_id>/item/<int:item_id>", methods=["PATCH"])
+@jwt_required()
+def update_stock(inventory_id: int, item_id: int):
+    context = {**_context(inventory_id), "item_id": item_id}
+    return jsonify(service.update_pantry_item(current_user, _arguments(context)))
+
+
+@inventory.route("/<int:inventory_id>/item/<int:item_id>/consume", methods=["POST"])
+@jwt_required()
+def consume_stock(inventory_id: int, item_id: int):
+    context = {**_context(inventory_id), "item_id": item_id}
+    return jsonify(service.consume(current_user, _arguments(context)))
+
+
+@inventory.route("/<int:inventory_id>/item/<int:item_id>/restock", methods=["POST"])
+@jwt_required()
+def restock_stock(inventory_id: int, item_id: int):
+    context = {**_context(inventory_id), "item_id": item_id}
+    return jsonify(service.restock(current_user, _arguments(context)))
+
+
+@inventory.route("/<int:inventory_id>/item/<int:item_id>", methods=["DELETE"])
+@jwt_required()
+def delete_stock(inventory_id: int, item_id: int):
+    context = {**_context(inventory_id), "item_id": item_id}
+    return jsonify(service.remove_stock(current_user, _arguments(context)))
+
+
+@inventory.route("/<int:inventory_id>", methods=["POST"])
+@jwt_required()
+def rename_location(inventory_id: int):
+    return jsonify(service.rename_storage(current_user, _arguments(_context(inventory_id))))
+
+
+@inventory.route("/<int:inventory_id>", methods=["DELETE"])
+@jwt_required()
+def delete_location(inventory_id: int):
+    return jsonify(service.delete_storage(current_user, _arguments(_context(inventory_id))))

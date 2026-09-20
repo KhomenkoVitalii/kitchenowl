@@ -93,3 +93,85 @@ class AddStock(Schema):
             raise ValidationError("Positive quantities require a unit.")
         if "state" in data and data["quantity_is_estimate"]:
             raise ValidationError("Qualitative observations cannot be estimated.")
+
+
+def _revision() -> fields.String:
+    """A fresh field instance; marshmallow fields must not be shared across schemas."""
+    return fields.String(required=True, validate=validate.Length(min=1, max=36))
+
+
+class Adjustment(Schema):
+    """Shared by consume and restock: a strictly positive amount in a stated unit."""
+
+    household_id = Identifier(required=True)
+    inventory_id = Identifier(required=True)
+    item_id = Identifier(required=True)
+    expected_revision = _revision()
+    quantity = Amount(required=True)
+    unit = Unit(required=True)
+    quantity_is_estimate = Estimate(load_default=False)
+
+    @validates_schema
+    def strictly_positive(self, data: dict[str, Any], **kwargs: Any) -> None:
+        if data["quantity"] <= 0:
+            raise ValidationError("Amount must be greater than zero.")
+
+
+class UpdatePantryItem(Schema):
+    """A discriminated setter/metadata edit so conflicting instructions can't be sent."""
+
+    household_id = Identifier(required=True)
+    inventory_id = Identifier(required=True)
+    item_id = Identifier(required=True)
+    expected_revision = _revision()
+    operation = fields.String(
+        required=True,
+        validate=validate.OneOf(
+            ["set_total", "mark_available", "mark_low", "mark_out", "update_metadata"]
+        ),
+    )
+    quantity = Amount()
+    unit = Unit(allow_none=True)
+    quantity_is_estimate = Estimate()
+    description = fields.String(allow_none=True)
+
+    @validates_schema
+    def per_operation(self, data: dict[str, Any], **kwargs: Any) -> None:
+        operation = data["operation"]
+        extras = {"quantity", "unit", "quantity_is_estimate", "description"} & data.keys()
+        if operation == "set_total":
+            if "quantity" not in data:
+                raise ValidationError("set_total requires a quantity.")
+            if "quantity_is_estimate" not in data:
+                raise ValidationError("set_total requires an explicit estimate flag.")
+            if data["quantity"] > 0 and not data.get("unit"):
+                raise ValidationError("Positive quantities require a unit.")
+            if "description" in data:
+                raise ValidationError("set_total does not change the note; use update_metadata.")
+        elif operation == "update_metadata":
+            if "description" not in data:
+                raise ValidationError("update_metadata requires a description (null clears it).")
+            if extras - {"description"}:
+                raise ValidationError("update_metadata only changes the note.")
+        elif extras:
+            raise ValidationError(f"{operation} takes no additional fields.")
+
+
+class RemoveStock(Schema):
+    household_id = Identifier(required=True)
+    inventory_id = Identifier(required=True)
+    item_id = Identifier(required=True)
+    expected_revision = _revision()
+
+
+class RenameStorage(Schema):
+    household_id = Identifier(required=True)
+    inventory_id = Identifier(required=True)
+    name = Name(required=True)
+    expected_revision = _revision()
+
+
+class DeleteStorage(Schema):
+    household_id = Identifier(required=True)
+    inventory_id = Identifier(required=True)
+    expected_revision = _revision()
